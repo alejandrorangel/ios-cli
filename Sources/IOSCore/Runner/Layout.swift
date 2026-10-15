@@ -10,6 +10,11 @@ public struct Rect: Codable, Equatable, Sendable {
     var maxY: Double { y + height }
     var isEmpty: Bool { width <= 0 || height <= 0 }
 
+    func union(_ other: Rect) -> Rect {
+        let left = min(x, other.x), top = min(y, other.y)
+        return Rect(x: left, y: top, width: max(maxX, other.maxX) - left, height: max(maxY, other.maxY) - top)
+    }
+
     func intersection(_ other: Rect) -> Rect? {
         let left = max(x, other.x), top = max(y, other.y)
         let right = min(maxX, other.maxX), bottom = min(maxY, other.maxY)
@@ -117,7 +122,10 @@ public enum Layout {
     /// placeholder, plus interactive controls. Off-screen and zero-size elements are dropped,
     /// and keyboard keys are left out (use `type` to enter text).
     public static func flatten(_ root: UIElementNode) -> [LayoutElement] {
-        let screen = root.children.first { $0.type == "Window" }?.frame ?? root.frame
+        // The application's frame is the screen. Not the first window: with iPad form sheets that
+        // window can be smaller than the display, and a sheet drawn outside it was dropped.
+        let windows = root.children.filter { $0.type == "Window" && !$0.frame.isEmpty }.map(\.frame)
+        let screen = !root.frame.isEmpty ? root.frame : windows.reduce(windows.first ?? root.frame) { $0.union($1) }
         var out: [LayoutElement] = []
         func visit(_ n: UIElementNode, insideKeyboard: Bool) {
             let keyboard = insideKeyboard || n.type == "Keyboard"

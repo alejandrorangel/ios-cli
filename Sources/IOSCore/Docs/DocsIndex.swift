@@ -167,7 +167,7 @@ public enum DocsIndex {
                     let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                     let languages = root["interfaceLanguages"] as? [String: Any]
                 else { return }
-                for language in ["swift", "occ"] {
+                for language in ["swift", "occ", "data"] { // "data": REST and JavaScript APIs (App Store Connect, MapKit JS…)
                     guard let nodes = languages[language] as? [[String: Any]] else { continue }
                     try walk(nodes, parent: "") { node, parent in
                         guard

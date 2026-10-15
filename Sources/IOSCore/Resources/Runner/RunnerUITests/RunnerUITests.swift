@@ -14,8 +14,25 @@ final class RunnerUITests: XCTestCase {
     let lock = NSLock()
     var pending: [(String, NWConnection)] = []
 
+    /// XCUITest waits for the app to go idle before and after every event, up to 60 s. Apps that
+    /// animate continuously (a playhead, a Lottie loop) never go idle, so each tap took a minute.
+    /// Skip those waits through XCUIApplicationProcess's private switches, as WebDriverAgent does;
+    /// applied only if the methods exist, and IOS_CLI_WAIT_FOR_IDLE=1 keeps Apple's behavior.
+    static func skipIdleWaits() -> [String] {
+        guard ProcessInfo.processInfo.environment["IOS_CLI_WAIT_FOR_IDLE"] != "1",
+              let cls = NSClassFromString("XCUIApplicationProcess") else { return [] }
+        return ["shouldSkipPreEventQuiescence", "shouldSkipPostEventQuiescence"].compactMap { name in
+            guard let method = class_getInstanceMethod(cls, NSSelectorFromString(name)) else { return nil }
+            let alwaysSkip: @convention(block) (AnyObject) -> Bool = { _ in true }
+            method_setImplementation(method, imp_implementationWithBlock(alwaysSkip))
+            return name
+        }
+    }
+
     func testServe() throws {
         continueAfterFailure = true
+        let skipped = Self.skipIdleWaits()
+        print("IOS_CLI_RUNNER idle waits skipped: \(skipped)")
         let portValue = ProcessInfo.processInfo.environment["IOS_CLI_PORT"].flatMap(UInt16.init) ?? 8100
         let listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: portValue)!)
         listener.newConnectionHandler = { connection in

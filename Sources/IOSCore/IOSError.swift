@@ -22,6 +22,7 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
     case symbolModuleUnavailable(module: String, detail: String)
     case runnerUnreachable(host: String, port: UInt16, reason: String)
     case runnerCommandFailed(command: String, message: String)
+    case runnerNoReply(command: String, seconds: Int)
     case runnerStartFailed(log: String, detail: String)
     case runnerBuildFailed(log: String, errors: [String])
     case runnerTeamRequired(candidates: [String])
@@ -58,6 +59,9 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
             return "Couldn't read the SwiftUI tree (the app must be a debug build you can attach to): \(reason.trimmingCharacters(in: .whitespacesAndNewlines))"
         case let .runnerUnreachable(host, port, reason):
             return "Can't reach the UI automation runner at \(host):\(port): \(reason)"
+        case let .runnerNoReply(command, seconds):
+            return "`\(command.split(separator: " ").first ?? "")` was sent but the runner didn't reply within \(seconds) s, "
+                + "so it may or may not have happened. Check with `ios layout`."
         case let .runnerCommandFailed(command, message):
             return "`\(command.split(separator: " ").first ?? "")` failed: \(message)"
         case let .runnerStartFailed(log, detail):

@@ -91,3 +91,21 @@ private func tree() throws -> UIElementNode {
                                               transport: "wired", tunnelAddress: "fd00::1", developerMode: nil))
     #expect(RunnerSessions.port(for: device) == 8100)
 }
+
+@Test func keepsSheetsOutsideTheFirstWindow() throws {
+    // iPad form sheet: the first window is a centred card, a second sheet sits at the bottom of the
+    // screen outside it. The application frame is the screen, so both must be kept.
+    let json = #"""
+    {"type": 2, "frame": [0, 0, 1024, 1366], "children": [
+      {"type": 4, "frame": [112, 200, 800, 900], "children": [
+        {"type": 9, "id": "transport-play", "label": "Play", "frame": [480, 1000, 64, 44]}
+      ]},
+      {"type": 4, "frame": [0, 0, 1024, 1366], "children": [
+        {"type": 40, "id": "count-in", "label": "Count In", "frame": [150, 1180, 700, 44]},
+        {"type": 33, "id": "guitar-volume", "label": "Guitar", "frame": [150, 1240, 700, 44]}
+      ]}
+    ]}
+    """#
+    let elements = Layout.flatten(try Layout.parse(try JSONSerialization.jsonObject(with: Data(json.utf8))))
+    #expect(elements.compactMap(\.id) == ["transport-play", "count-in", "guitar-volume"])
+}

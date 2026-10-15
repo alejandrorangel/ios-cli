@@ -47,7 +47,11 @@ enum TCPClient {
         var buffer = [UInt8](repeating: 0, count: 1 << 16)
         while true {
             let n = recv(fd, &buffer, buffer.count, 0)
-            if n < 0 { throw IOSError.runnerUnreachable(host: host, port: port, reason: errno == EAGAIN ? "timed out" : String(cString: strerror(errno))) }
+            if n < 0 {
+                // The command already went out, so it may have taken effect; say so instead of "unreachable".
+                if errno == EAGAIN { throw IOSError.runnerNoReply(command: line, seconds: Int(timeout)) }
+                throw IOSError.runnerUnreachable(host: host, port: port, reason: String(cString: strerror(errno)))
+            }
             if n == 0 { break }
             reply.append(contentsOf: buffer[0..<n])
             if buffer[n - 1] == 0 {

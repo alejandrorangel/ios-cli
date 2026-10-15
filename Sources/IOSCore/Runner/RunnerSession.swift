@@ -17,7 +17,8 @@ public struct RunnerSession: Codable, Sendable {
     }
 
     /// Sends one command and returns its result; throws the runner's error message.
-    public func send(_ command: String, timeout: TimeInterval = 60) throws -> Reply {
+    /// Actions get more than XCUITest's own 60 s limits, so its errors arrive instead of a client timeout.
+    public func send(_ command: String, timeout: TimeInterval = 120) throws -> Reply {
         let data = try TCPClient.request(host: host, port: port, line: command, timeout: timeout)
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw IOSError.runnerUnreachable(host: host, port: port, reason: "no reply (the runner may have stopped; see \(log))")
@@ -59,7 +60,7 @@ public enum RunnerSessions {
         let script = "nohup /usr/bin/xcrun xcodebuild test-without-building -xctestrun \"$1\" -destination \"id=$2\" "
             + "-destination-timeout 60 > \"$3\" 2>&1 & echo $!"
         let started = try Shell.run("/bin/sh", ["-c", script, "sh", xctestrun.path, target.udid, log.path],
-                                    environment: ["TEST_RUNNER_IOS_CLI_PORT": String(port)])
+                                    environment: runnerEnvironment(port: port))
         guard let pid = Int32(started.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw IOSError.runnerStartFailed(log: log.path, detail: started.stderr)
         }
@@ -73,22 +74,30 @@ public enum RunnerSessions {
                 return session
             }
             if kill(pid, 0) != 0 { // xcodebuild exited: build/launch failure
-                throw IOSError.runnerStartFailed(log: log.path, detail: tail(of: log))
+                throw IOSError.runnerStartFailed(log: log.path, detail: startFailureHint(log: log, target: target) + tail(of: log))
             }
             Thread.sleep(forTimeInterval: 0.5)
         }
         kill(pid, SIGTERM)
-        throw IOSError.runnerStartFailed(log: log.path, detail: "timed out waiting for the runner\n" + tail(of: log))
+        throw IOSError.runnerStartFailed(log: log.path, detail: "timed out waiting for the runner\n" + startFailureHint(log: log, target: target) + tail(of: log))
     }
 
     /// The saved session if its runner still answers.
     public static func current(_ target: Target) -> RunnerSession? {
         guard
             let data = try? Data(contentsOf: stateFile(target.udid)),
-            let session = try? JSONDecoder().decode(RunnerSession.self, from: data),
-            (try? session.send("ping", timeout: 3)) != nil
+            let session = try? JSONDecoder().decode(RunnerSession.self, from: data)
         else { return nil }
-        return session
+        do {
+            _ = try session.send("ping", timeout: 3)
+            return session
+        } catch IOSError.runnerNoReply where kill(session.pid, 0) == 0 {
+            // Alive but busy with another command (commands run one at a time, possibly for another
+            // session): wait for it rather than restarting the runner underneath that command.
+            return (try? session.send("ping", timeout: 150)) != nil ? session : nil
+        } catch {
+            return nil
+        }
     }
 
     /// Stops the target's runner. Returns false if none was running.
@@ -142,6 +151,29 @@ public enum RunnerSessions {
         var hash: UInt32 = 2_166_136_261 // FNV-1a: stable across runs, unlike hashValue
         for byte in target.udid.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
         return 8101 + UInt16(hash % 800)
+    }
+
+    /// Variables for the test process; xcodebuild passes TEST_RUNNER_-prefixed ones on without the prefix.
+    static func runnerEnvironment(port: UInt16) -> [String: String] {
+        var environment = ["TEST_RUNNER_IOS_CLI_PORT": String(port)]
+        if let wait = ProcessInfo.processInfo.environment["IOS_CLI_WAIT_FOR_IDLE"] {
+            environment["TEST_RUNNER_IOS_CLI_WAIT_FOR_IDLE"] = wait
+        }
+        return environment
+    }
+
+    /// Plain-language causes for failures that otherwise show up as an xcodebuild dump.
+    static func startFailureHint(log: URL, target: Target) -> String {
+        let text = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
+        if text.contains("enabling automation mode") || text.contains("Automation Mode") {
+            return target.isSimulator
+                ? "UI automation couldn't be enabled on the simulator; try rebooting it (`xcrun simctl shutdown`/`boot`).\n"
+                : "UI automation isn't enabled on the device: turn on Settings → Developer → Enable UI Automation, unlock the device, and retry.\n"
+        }
+        if text.contains("is locked") || text.contains("passcode") {
+            return "The device is locked; unlock it and retry.\n"
+        }
+        return ""
     }
 
     static func tail(of log: URL, lines: Int = 15) -> String {
