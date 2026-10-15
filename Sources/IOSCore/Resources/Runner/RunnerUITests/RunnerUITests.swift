@@ -282,7 +282,19 @@ final class RunnerUITests: XCTestCase {
             spoken.append(next)
         }
 
-        return ["spoken": spoken, "complete": stoppedAtEnd, "voiceOverWasOn": wasEnabled]
+        var result: [String: Any] = ["spoken": spoken, "complete": stoppedAtEnd, "voiceOverWasOn": wasEnabled]
+        // A system alert (Low Battery, a permission prompt…) takes VoiceOver's focus, and the walk
+        // reads it instead of the app. Report it and mark the items that came from it.
+        if let alert = Self.systemAlert() {
+            let items = spoken.indices.filter { index in
+                // Either can be the longer one: speech may be cut short, or add a trait ("Allow Button").
+                alert.texts.contains { text in
+                    text.count >= 3 && (spoken[index].hasPrefix(text) || (spoken[index].count >= 10 && text.hasPrefix(spoken[index])))
+                }
+            }.map { $0 + 1 }
+            result["systemAlert"] = ["title": alert.title, "items": items]
+        }
+        return result
     }
 
     /// XCTest's snapshot objects (XCElementSnapshot) carry hasKeyboardFocus, though the public
@@ -296,6 +308,19 @@ final class RunnerUITests: XCTestCase {
     static func hasKeyboardFocus(_ snapshot: XCUIElementSnapshot) -> Bool {
         guard carriesKeyboardFocus(snapshot), let object = snapshot as? NSObject else { return false }
         return object.value(forKey: keyboardFocusKey) as? Bool ?? false
+    }
+
+    /// The system alert SpringBoard is showing, if any: its title and every text in it.
+    static func systemAlert() -> (title: String, texts: [String])? {
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        guard alert.exists, let snapshot = try? alert.snapshot() else { return nil }
+        var texts: [String] = []
+        func collect(_ node: XCUIElementSnapshot) {
+            if !node.label.isEmpty { texts.append(node.label) }
+            node.children.forEach(collect)
+        }
+        collect(snapshot)
+        return (snapshot.label.isEmpty ? texts.first ?? "System alert" : snapshot.label, texts)
     }
 
     var currentBundle = ""

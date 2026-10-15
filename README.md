@@ -81,7 +81,7 @@ All planned commands work. Every command accepts `--json` for machine-readable o
 | Command | What it does |
 |---|---|
 | `ios layout [--bundle-id B] [--full]` | Visible elements with type, identifier, label, value, state and tap point |
-| `ios layout --voiceover [--max N]` | What VoiceOver reads on the screen, in its navigation order (iOS 27+, via `XCUIVoiceOverService`). Unlike the element list, views hidden from accessibility don't appear, so use it to check accessibility. VoiceOver is switched back off afterwards |
+| `ios layout --voiceover [--max N]` | What VoiceOver reads on the screen, in its navigation order (iOS 27+, via `XCUIVoiceOverService`). Unlike the element list, views hidden from accessibility don't appear, so use it to check accessibility. Items read from a system alert (Low Battery, permission prompts) are flagged. VoiceOver is switched back off afterwards |
 | `ios layout --swiftui [--relaunch]` | The app's SwiftUI view tree (its own views, stacks, lists, `Text` with its string). `--relaunch` restarts the app with SwiftUI's debug data on; navigate with `ios input`, then read again. Debug builds only |
 | `ios input tap --id I` / `--label L` / `<x> <y>` | Tap an element or a point |
 | `ios input doubletap …`, `swipe <x1 y1 x2 y2>`, `swipe --direction up`, `type <text>`, `button home` | Other input |

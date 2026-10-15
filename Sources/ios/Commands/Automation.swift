@@ -79,17 +79,35 @@ struct LayoutCommand: ParsableCommand {
         let spoken: [String]
         /// False when the walk stopped at --max before reaching the last element.
         let complete: Bool
+        /// A system alert (Low Battery, a permission prompt…) that took VoiceOver's focus; `items`
+        /// are the 1-based positions in `spoken` read from it.
+        let systemAlert: SystemAlert?
+
+        struct SystemAlert: Encodable {
+            let title: String
+            let items: [Int]
+        }
     }
 
     func run() throws {
         if swiftui { return try runSwiftUI() }
         if voiceover {
             let reply = try automation.session().send("voiceover \(max)", timeout: 900).result as? [String: Any] ?? [:]
-            let result = VoiceOverResult(spoken: reply["spoken"] as? [String] ?? [], complete: reply["complete"] as? Bool ?? false)
+            let alert = (reply["systemAlert"] as? [String: Any]).map {
+                VoiceOverResult.SystemAlert(title: $0["title"] as? String ?? "System alert", items: $0["items"] as? [Int] ?? [])
+            }
+            let result = VoiceOverResult(spoken: reply["spoken"] as? [String] ?? [], complete: reply["complete"] as? Bool ?? false,
+                                         systemAlert: alert)
             try Output.emit(result, json: global.json) {
-                var lines = result.spoken.enumerated().map { "\($0.offset + 1). \($0.element)" }
+                var lines = result.spoken.enumerated().map { index, text in
+                    "\(index + 1). \(text)" + (alert?.items.contains(index + 1) == true ? "  (system alert)" : "")
+                }
                 if lines.isEmpty { lines = ["VoiceOver read nothing (the app may still be loading)."] }
                 if !result.complete { lines.append("… stopped after \(max) elements (raise --max to continue)") }
+                if let alert {
+                    lines.append("⚠ A system alert (\"\(alert.title)\") is showing and took VoiceOver's focus, so this isn't the app's full "
+                                 + "screen. Dismiss it and run `ios layout --voiceover` again.")
+                }
                 return lines.joined(separator: "\n")
             }
             return

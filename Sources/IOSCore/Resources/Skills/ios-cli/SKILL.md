@@ -55,7 +55,7 @@ ios logs --bundle-id com.example.MyApp --last 1m
 ```
 If `layout` comes back empty right after a launch, the app is still loading — run it again.
 
-`ios layout` lists XCUITest's automation elements, which include views hidden from VoiceOver (e.g. `.accessibilityHidden(true)`). To check accessibility, use `ios layout --voiceover` (iOS 27+): it walks the screen with VoiceOver and lists what it speaks, in order. It takes a few seconds per screen and switches VoiceOver back off afterwards. Elements marked `covered` in `ios layout` sit under a full-screen presentation; tap what's on top.
+`ios layout` lists XCUITest's automation elements, which include views hidden from VoiceOver (e.g. `.accessibilityHidden(true)`). To check accessibility, use `ios layout --voiceover` (iOS 27+): it walks the screen with VoiceOver and lists what it speaks, in order. It takes a few seconds per screen and switches VoiceOver back off afterwards. If a system alert (Low Battery, a permission prompt) is showing, VoiceOver reads it instead: those items are marked `(system alert)` and a warning follows — dismiss the alert and walk again. Elements marked `covered` in `ios layout` sit under a full-screen presentation; tap what's on top.
 
 Physical devices need **Settings → Developer → Enable UI Automation**, and the runner is signed with the team's development profile (auto-detected from a local wildcard profile, or `--team <TEAM_ID>`).
 
