@@ -1,0 +1,100 @@
+import Foundation
+import Testing
+@testable import IOSCore
+
+private func words(_ s: String) -> [String] {
+    DocsIndex.splitWords(s).split(separator: " ").map(String.init)
+}
+
+@Test func splitsCamelCaseLikeThePrototype() {
+    #expect(words("navigationDestination(for:destination:)") == ["navigation", "destination", "for", "destination"])
+    #expect(words("URLSession") == ["url", "session"])
+    #expect(words("AVAudioSession.Category") == ["av", "audio", "session", "category"])
+    #expect(words("UIView2D") == ["ui", "view2", "d"]) // matches the Python regexes
+    #expect(words("core-bluetooth") == ["core", "bluetooth"])
+    #expect(words("") == [])
+}
+
+@Test func normalizesDocPaths() {
+    #expect(DocsPage.normalizePath("doc://swiftui/view") == "/documentation/swiftui/view")
+    #expect(DocsPage.normalizePath("SwiftUI/View/") == "/documentation/swiftui/view")
+    #expect(DocsPage.normalizePath("https://developer.apple.com/documentation/UIKit/UIView") == "/documentation/uikit/uiview")
+    #expect(DocsPage.normalizePath("/documentation/xcode/configuring-background-execution-modes")
+            == "/documentation/xcode/configuring-background-execution-modes")
+    #expect(DocsPaths.docURL(forPath: "/documentation/swiftui/view") == "doc://swiftui/view")
+}
+
+@Test func readsFrameworkNamesFromCatalog() throws {
+    let catalog = #"""
+    {"references": {
+      "a": {"url": "/documentation/swiftui", "title": "SwiftUI"},
+      "b": {"url": "/documentation/swiftui/view", "title": "View"},
+      "c": {"url": "/documentation/corebluetooth", "title": "Core Bluetooth"},
+      "d": {"url": "https://example.com", "title": "External"}
+    }}
+    """#
+    #expect(try DocsIndex.frameworkNames(fromCatalog: Data(catalog.utf8)) == ["corebluetooth", "swiftui"])
+}
+
+@Test func rendersDocCPageAsMarkdown() throws {
+    let page = #"""
+    {
+      "metadata": {"title": "navigationDestination(for:destination:)", "roleHeading": "Instance Method",
+                   "modules": [{"name": "SwiftUI"}],
+                   "platforms": [{"name": "iOS", "introducedAt": "16.0"}, {"name": "visionOS", "introducedAt": "1.0", "beta": true}]},
+      "abstract": [{"type": "text", "text": "Associates a destination view with a "}, {"type": "codeVoice", "code": "NavigationStack"}, {"type": "text", "text": "."}],
+      "primaryContentSections": [
+        {"kind": "declarations", "declarations": [{"tokens": [{"text": "func "}, {"text": "navigationDestination"}]}]},
+        {"kind": "content", "content": [
+          {"type": "heading", "level": 2, "text": "Discussion"},
+          {"type": "paragraph", "inlineContent": [{"type": "text", "text": "Use a "}, {"type": "reference", "identifier": "doc://com.apple.SwiftUI/documentation/SwiftUI/NavigationLink"}]},
+          {"type": "aside", "style": "important", "name": "Important", "content": [{"type": "paragraph", "inlineContent": [{"type": "text", "text": "Not in lazy containers."}]}]},
+          {"type": "codeListing", "syntax": "swift", "code": ["NavigationStack {", "}"]},
+          {"type": "table", "rows": [
+            [[{"type": "paragraph", "inlineContent": [{"type": "text", "text": "Key"}]}], [{"type": "paragraph", "inlineContent": [{"type": "text", "text": "Value"}]}]],
+            [[{"type": "paragraph", "inlineContent": [{"type": "text", "text": "a|b"}]}], [{"type": "paragraph", "inlineContent": [{"type": "text", "text": "1"}]}]]
+          ]}
+        ]}
+      ],
+      "references": {
+        "doc://com.apple.SwiftUI/documentation/SwiftUI/NavigationLink": {"title": "NavigationLink", "url": "/documentation/swiftui/navigationlink"}
+      }
+    }
+    """#
+    let markdown = try DocsPage.toMarkdown(Data(page.utf8))
+    #expect(markdown.hasPrefix("# navigationDestination(for:destination:)\n\nInstance Method · SwiftUI"))
+    #expect(markdown.contains("**Availability:** iOS 16.0+, visionOS 1.0+ (beta)"))
+    #expect(markdown.contains("Associates a destination view with a `NavigationStack`."))
+    #expect(markdown.contains("```swift\nfunc navigationDestination\n```"))
+    #expect(markdown.contains("### Discussion"))
+    #expect(markdown.contains("Use a [`NavigationLink`](doc://swiftui/navigationlink)"))
+    #expect(markdown.contains("> **Important:** Not in lazy containers."))
+    #expect(markdown.contains("| Key | Value |\n|---|---|\n| a\\|b | 1 |"))
+}
+
+@Test func searchesABuiltIndex() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ios-cli-docs-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let index = #"""
+    {"interfaceLanguages": {"swift": [
+      {"path": "/documentation/swiftui", "title": "SwiftUI", "type": "module", "children": [
+        {"title": "Navigation", "type": "groupMarker"},
+        {"path": "/documentation/swiftui/navigationstack", "title": "NavigationStack", "type": "struct"},
+        {"path": "/documentation/swiftui/view/navigationdestination(for:destination:)",
+         "title": "func navigationDestination<D, C>(for: D.Type, destination: (D) -> C) -> some View", "type": "method"},
+        {"path": "/documentation/swiftui/navigationview", "title": "NavigationView", "type": "struct", "deprecated": true}
+      ]}
+    ]}}
+    """#
+    let db = dir.appendingPathComponent("docs.db").path
+    let pages = try DocsIndex.build(database: db) { insert in try insert("swiftui", Data(index.utf8)) }
+    #expect(pages == 4) // group markers aren't pages
+
+    setenv("IOS_CLI_DOCS_DIR", dir.path, 1)
+    defer { unsetenv("IOS_CLI_DOCS_DIR") }
+    let results = try DocsIndex.search("navigation destination")
+    #expect(results.first?.path == "/documentation/swiftui/view/navigationdestination(for:destination:)")
+    let stack = try DocsIndex.search("navigation", kind: "struct")
+    #expect(stack.first?.title == "NavigationStack") // deprecated NavigationView ranks lower
+}

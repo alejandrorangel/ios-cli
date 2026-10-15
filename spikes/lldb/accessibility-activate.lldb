@@ -1,0 +1,4 @@
+expr -l objc -- @import Foundation
+expr -l objc -- @import UIKit
+expr -l objc -O -- NSString *target = @"Songs"; NSString *res = @"not found"; NSMutableArray *stack = [NSMutableArray arrayWithObject:(NSObject *)[[UIApplication sharedApplication] keyWindow]]; while ([stack count] > 0) { NSObject *e = (NSObject *)[stack lastObject]; [stack removeLastObject]; NSString *ident = [e respondsToSelector:@selector(accessibilityIdentifier)] ? (NSString *)[(id)e accessibilityIdentifier] : nil; if ([e isAccessibilityElement] && [ident isEqualToString:target]) { BOOL ok = [e accessibilityActivate]; res = ok ? @"activated" : @"activate returned NO"; break; } NSArray *kids = [e accessibilityElements]; if (kids == nil && [e isKindOfClass:[UIView class]]) kids = [(UIView *)e subviews]; for (id k in [kids reverseObjectEnumerator]) [stack addObject:k]; } res
+detach
