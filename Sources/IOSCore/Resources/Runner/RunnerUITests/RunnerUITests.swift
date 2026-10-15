@@ -177,10 +177,15 @@ final class RunnerUITests: XCTestCase {
 
         case "snapshot":
             let target = Self.unpruned(try currentApp())
-            // Snapshots only carry tvOS-style focus; find the keyboard focus with a query.
-            let focused = target.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
-            keyboardFocus = focused.exists ? (focused.elementType, focused.frame) : nil
-            return node(try Self.fullSnapshot(target))
+            let snapshot = try Self.fullSnapshot(target)
+            keyboardFocus = nil
+            if !Self.carriesKeyboardFocus(snapshot) {
+                // Older XCTest: the public snapshot only has tvOS-style focus, so find the keyboard
+                // focus with a query (slow on devices: it was 6–11 s on an iPad).
+                let focused = target.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
+                keyboardFocus = focused.exists ? (focused.elementType, focused.frame) : nil
+            }
+            return node(snapshot)
 
         case "voiceover":
             // "voiceover on|off" toggles VoiceOver (e.g. to present screens the way a VoiceOver user
@@ -280,6 +285,19 @@ final class RunnerUITests: XCTestCase {
         return ["spoken": spoken, "complete": stoppedAtEnd, "voiceOverWasOn": wasEnabled]
     }
 
+    /// XCTest's snapshot objects (XCElementSnapshot) carry hasKeyboardFocus, though the public
+    /// XCUIElementSnapshot protocol doesn't declare it; reading it avoids a separate query.
+    static let keyboardFocusKey = "hasKeyboardFocus"
+
+    static func carriesKeyboardFocus(_ snapshot: XCUIElementSnapshot) -> Bool {
+        (snapshot as AnyObject).responds(to: NSSelectorFromString(keyboardFocusKey))
+    }
+
+    static func hasKeyboardFocus(_ snapshot: XCUIElementSnapshot) -> Bool {
+        guard carriesKeyboardFocus(snapshot), let object = snapshot as? NSObject else { return false }
+        return object.value(forKey: keyboardFocusKey) as? Bool ?? false
+    }
+
     var currentBundle = ""
     var keyboardFocus: (XCUIElement.ElementType, CGRect)?
 
@@ -298,6 +316,7 @@ final class RunnerUITests: XCTestCase {
         if let placeholder = e.placeholderValue, !placeholder.isEmpty { d["placeholder"] = placeholder }
         if !e.isEnabled { d["enabled"] = false }
         if e.isSelected { d["selected"] = true }
+        if Self.hasKeyboardFocus(e) { d["focused"] = true }
         if let focus = keyboardFocus, focus.0 == e.elementType, focus.1 == e.frame { d["focused"] = true }
         if !e.children.isEmpty { d["children"] = e.children.map(node) }
         return d

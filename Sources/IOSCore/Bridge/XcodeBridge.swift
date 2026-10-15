@@ -22,7 +22,7 @@ public final class XcodeBridge {
 
         _ = try request("initialize", [
             "protocolVersion": "2025-06-18", "capabilities": [String: Any](),
-            "clientInfo": ["name": "ios-cli", "version": "0.3.2"],
+            "clientInfo": ["name": "ios-cli", "version": "0.3.3"],
         ])
         try send(["jsonrpc": "2.0", "method": "notifications/initialized"])
     }
