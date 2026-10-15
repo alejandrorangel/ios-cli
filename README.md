@@ -97,8 +97,8 @@ All planned commands work. Every command accepts `--json` for machine-readable o
 
 | Command | What it does |
 |---|---|
-| `ios docs search <words> [--framework F] [--kind K] [--hig]` | Searches Apple's documentation (about 383k pages: frameworks, REST/JS web services, sample code, release notes) and the Human Interface Guidelines (172 pages; `--hig` for those only). The first search builds the index (~30 s) |
-| `ios docs fetch <doc://…, hig://…, path or URL>` | A documentation or HIG page as markdown, with `doc://` / `hig://` links to follow; cached 7 days |
+| `ios docs search <words> [--source S] [--framework F] [--kind K]` | Searches about 384k pages: API docs (frameworks, REST/JS web services, sample code, release notes), the Human Interface Guidelines, Apple's tutorials, the Swift book, the App Store Review Guidelines and WWDC sessions (2023–2026). `--source api\|hig\|tutorials\|swift-book\|app-review\|wwdc` limits to one. The first search builds the index (under a minute) |
+| `ios docs fetch <link or URL>` | A page as markdown: `doc://…` (API docs, Swift book), `hig://…`, `tutorial://…` (steps with code), `asrg://4.2` (a Review Guideline and its sub-items; `asrg://` for the contents), `wwdc://2026/258` (description and timestamped transcript), or the developer.apple.com / docs.swift.org URL |
 | `ios docs api <Module.Symbol>` | Declaration, availability and doc comment from the installed SDK (offline; a module is extracted on first use, ~3–12 s) |
 | `ios docs update` | Rebuild the search index |
 

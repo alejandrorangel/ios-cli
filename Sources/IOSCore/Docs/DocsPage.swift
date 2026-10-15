@@ -9,7 +9,10 @@ public enum DocsPage {
         var path = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if path.hasPrefix("doc://") { path = "/documentation/" + path.dropFirst("doc://".count) }
         if path.hasPrefix("hig://") { path = HIG.root + "/" + path.dropFirst("hig://".count) }
+        if path.hasPrefix("tutorial://") { path = "/tutorials/" + path.dropFirst("tutorial://".count) }
         path = path.replacing(/^https?:\/\/developer\.apple\.com/, with: "")
+        path = path.replacing(/^https?:\/\/docs\.swift\.org\/swift-book/, with: "")
+        if let hash = path.firstIndex(of: "#") { path = String(path[..<hash]) }
         if !path.hasPrefix("/") { path = "/documentation/" + path }
         while path.hasSuffix("/") { path.removeLast() }
         return path.lowercased()
@@ -27,7 +30,9 @@ public enum DocsPage {
         }
 
         let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-        let url = "\(DocsPaths.base)\(encoded).json"
+        // The Swift book is published on docs.swift.org, everything else on developer.apple.com.
+        let base = path.hasPrefix(DocsPaths.swiftBookPrefix) ? DocsPaths.swiftBookBase : DocsPaths.base
+        let url = "\(base)\(encoded).json"
         let result = try Shell.run("/usr/bin/curl", [
             "--silent", "--show-error", "--location", "--max-time", "30", "--user-agent", DocsPaths.userAgent,
             "--write-out", "\n%{http_code}", url,
@@ -46,8 +51,20 @@ public enum DocsPage {
         return Data(body)
     }
 
+    /// Any supported page as markdown: DocC pages (API docs, HIG, tutorials, Swift book), the App
+    /// Store Review Guidelines (`asrg://4.2`) and WWDC sessions (`wwdc://2026/258`).
     public static func markdown(_ input: String, refresh: Bool = false) throws -> String {
-        try toMarkdown(fetchJSON(input, refresh: refresh))
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("asrg://") { return try ReviewGuidelines.markdown(String(trimmed.dropFirst("asrg://".count)), refresh: refresh) }
+        if trimmed.contains("/app-store/review/guidelines") {
+            let anchor = trimmed.split(separator: "#").dropFirst().first.map(String.init) ?? ""
+            return try ReviewGuidelines.markdown(anchor, refresh: refresh)
+        }
+        if trimmed.hasPrefix("wwdc://") { return try WWDC.markdown(String(trimmed.dropFirst("wwdc://".count))) }
+        if let match = trimmed.firstMatch(of: /\/videos\/play\/wwdc(\d{4})\/(\d+)/) {
+            return try WWDC.markdown("\(match.output.1)/\(match.output.2)")
+        }
+        return try toMarkdown(fetchJSON(trimmed, refresh: refresh))
     }
 
     // MARK: DocC render JSON → markdown
@@ -106,6 +123,8 @@ public enum DocsPage {
                 }
             }
 
+            out += tutorialSections()
+
             for (key, fallback, prefix) in [("topicSections", "Topics", ""), ("relationshipsSections", "Relationships", ""),
                                             ("seeAlsoSections", "", "See Also: ")] {
                 for section in page[key] as? [[String: Any]] ?? [] {
@@ -117,6 +136,56 @@ public enum DocsPage {
             }
             // Lists are joined tighter than paragraphs, as in the prototype.
             return out.joined(separator: "\n\n").replacingOccurrences(of: "\n\n- ", with: "\n- ")
+        }
+
+        /// Tutorial pages (`kind` overview/project) use `sections` instead of primaryContentSections.
+        private func tutorialSections() -> [String] {
+            var out: [String] = []
+            var number = 0
+            for section in page["sections"] as? [[String: Any]] ?? [] {
+                switch section["kind"] as? String {
+                case "hero":
+                    out += blocks(section["content"])
+                    if let minutes = section["estimatedTimeInMinutes"] as? Int { out.append("*Estimated time: \(minutes) minutes*") }
+                case "tasks":
+                    for task in section["tasks"] as? [[String: Any]] ?? [] {
+                        number += 1
+                        out.append("## Section \(number): \(task["title"] as? String ?? "")")
+                        for item in task["contentSection"] as? [[String: Any]] ?? [] { out += blocks(item["content"]) }
+                        var step = 0
+                        for item in task["stepsSection"] as? [[String: Any]] ?? [] {
+                            if item["type"] as? String == "step" {
+                                step += 1
+                                out.append("**Step \(step).** " + blocks(item["content"]).joined(separator: " "))
+                                if let code = item["code"] as? String, let file = references[code] { out.append(codeFile(file)) }
+                                let caption = blocks(item["caption"]).joined(separator: " ")
+                                if !caption.isEmpty { out.append(caption) }
+                            } else {
+                                out += blocks([item])
+                            }
+                        }
+                    }
+                case "volume":
+                    for chapter in section["chapters"] as? [[String: Any]] ?? [] {
+                        out.append("## \(chapter["name"] as? String ?? "")")
+                        out += blocks(chapter["content"])
+                        for id in chapter["tutorials"] as? [String] ?? [] { out.append("- " + reference(id, override: nil)) }
+                    }
+                case "callToAction":
+                    if let action = section["action"] as? [String: Any], let id = action["identifier"] as? String {
+                        out.append("**Next:** " + reference(id, override: nil))
+                    }
+                default:
+                    break
+                }
+            }
+            return out
+        }
+
+        /// A tutorial step's code file reference as a fenced code block.
+        private func codeFile(_ file: [String: Any]) -> String {
+            let lines = (file["content"] as? [String] ?? []).joined(separator: "\n")
+            return "`\(file["fileName"] as? String ?? "")`\n```\(file["syntax"] as? String ?? "")\n\(lines)\n```"
         }
 
         private func platformText(_ p: [String: Any]) -> String {
@@ -135,7 +204,7 @@ public enum DocsPage {
                 : (ref["title"] as? String ?? String(identifier.split(separator: "/").last ?? ""))
             let url = ref["url"] as? String ?? ""
             if ref["type"] as? String == "link" { return "[\(title)](\(url))" }
-            if url.hasPrefix("/documentation/") || url.hasPrefix(HIG.root) {
+            if url.hasPrefix("/documentation/") || url.hasPrefix(HIG.root) || url.hasPrefix("/tutorials/") {
                 return "[`\(title)`](\(DocsPaths.docURL(forPath: String(url.prefix { $0 != "#" }))))"
             }
             return "`\(title)`"

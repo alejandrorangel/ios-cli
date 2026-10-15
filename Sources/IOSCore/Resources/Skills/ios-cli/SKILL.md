@@ -67,6 +67,9 @@ Physical devices need **Settings → Developer → Enable UI Automation**, and t
 
 - `ios docs search "core bluetooth scan" [--framework swiftui] [--kind method]` — all Apple docs plus the Human Interface Guidelines (first run builds the index, ~30 s). Results are `doc://…` (API docs) or `hig://…` (guidelines) paths.
 - `ios docs search sliders --hig` — only the Human Interface Guidelines. Check the relevant guideline (controls, dark mode, accessibility, app icons, platform conventions) when designing or reviewing UI.
+- `--source tutorials|swift-book|app-review|wwdc|api` limits a search to Apple's tutorials, the Swift book, the App Store Review Guidelines, WWDC sessions, or API docs only.
+- `ios docs fetch asrg://5.1.1` — a Review Guideline (check before adding purchases, sign-in, data collection, user-generated content…); `asrg://` lists them all.
+- `ios docs fetch wwdc://2026/258` — a WWDC session's description and full timestamped transcript (find sessions with `--source wwdc`); `tutorial://…` pages include each step's code.
 - `ios docs fetch doc://swiftui/navigationstack` / `ios docs fetch hig://sliders` — a page as markdown, with `doc://` / `hig://` links to follow (HIG pages link to the matching APIs, e.g. `doc://swiftui/slider`).
 - `ios docs api SwiftUI.View.navigationDestination` — declaration, availability and doc comment from the installed SDK (first use of a module takes ~3–12 s). Objective-C-based modules (UIKit, AVFoundation) have declarations but little prose; use `docs fetch` for those.
 

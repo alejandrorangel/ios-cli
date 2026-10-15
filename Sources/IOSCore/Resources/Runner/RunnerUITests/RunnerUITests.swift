@@ -182,6 +182,10 @@ final class RunnerUITests: XCTestCase {
             keyboardFocus = focused.exists ? (focused.elementType, focused.frame) : nil
             return node(try Self.fullSnapshot(target))
 
+        case "snapshot-public":
+            // Diagnostic: XCTest's public snapshot (modal pruning on), to compare with "snapshot".
+            return node(try currentApp().snapshot())
+
         case "describe":
             return try currentApp().debugDescription
 

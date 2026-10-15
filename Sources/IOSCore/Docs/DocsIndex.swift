@@ -20,8 +20,10 @@ public struct DocsIndexStatus: Codable, Sendable {
     public let pages: Int
     public let frameworks: Int
     public let failedFrameworks: [String]
-    /// Human Interface Guidelines pages (crawled; searchable with --hig).
+    /// Pages outside the framework catalog (HIG, tutorials, Review Guidelines, WWDC sessions).
     public let guidePages: Int
+    /// Page count per source label (frameworks are counted as "api").
+    public let sources: [String: Int]
     public let seconds: Double
 }
 
@@ -35,12 +37,19 @@ public enum DocsPaths {
 
     public static var indexDatabase: URL { directory.appendingPathComponent("docs.db") }
 
-    static let userAgent = "ios-cli/0.1"
+    static let userAgent = "ios-cli/0.2"
     static let base = "https://developer.apple.com/tutorials/data"
+    /// The Swift Programming Language book lives on docs.swift.org (same DocC format).
+    static let swiftBookBase = "https://docs.swift.org/swift-book/data"
+    static let swiftBookIndex = "https://docs.swift.org/swift-book/index/index.json"
+    static let swiftBookPrefix = "/documentation/the-swift-programming-language"
 
     /// `doc://swiftui/view` for API docs, `hig://sliders` for the Human Interface Guidelines.
     public static func docURL(forPath path: String) -> String {
         if path.hasPrefix("/documentation/") { return "doc://" + path.dropFirst("/documentation/".count) }
+        if path.hasPrefix("/tutorials/") { return "tutorial://" + path.dropFirst("/tutorials/".count) }
+        if path.hasPrefix(ReviewGuidelines.pathPrefix + "/") { return "asrg://" + path.dropFirst(ReviewGuidelines.pathPrefix.count + 1) }
+        if let match = path.firstMatch(of: /^\/videos\/play\/wwdc(\d{4})\/(\d+)/) { return "wwdc://\(match.output.1)/\(match.output.2)" }
         if path.hasPrefix(HIG.root + "/") { return "hig://" + path.dropFirst(HIG.root.count + 1) }
         if path == HIG.root { return "hig://" }
         return path
@@ -54,6 +63,20 @@ public enum DocsIndex {
         "protocol": 1.5, "module": 2.0, "framework": 2.0, "enum": 0.8, "func": 0.6, "method": 0.5, "init": 0.3,
         "property": 0.3, "var": 0.2, "case": 0.0, "typealias": 0.1, "op": -0.5,
     ]
+
+    /// Source labels outside the framework catalog, with words that help queries find them.
+    public static let sourceWords: [String: String] = [
+        "hig": "hig human interface guidelines design",
+        "tutorials": "tutorials tutorial learn guided",
+        "swift-book": "swift book language programming",
+        "app-review": "app review guidelines store submission",
+        "wwdc": "wwdc video session talk",
+    ]
+    static var specialSourcesSQL: String { "(" + sourceWords.keys.sorted().map { "'\($0)'" }.joined(separator: ",") + ")" }
+
+    /// Small ranking boosts: design guidance and learning material should surface for broad queries
+    /// without outranking an exact API match.
+    static let sourceBoost: [String: Double] = ["hig": 1, "tutorials": 0.5, "swift-book": 0.5]
 
     public static var exists: Bool { FileManager.default.fileExists(atPath: DocsPaths.indexDatabase.path) }
 
@@ -75,13 +98,19 @@ public enum DocsIndex {
         let frameworks = try frameworkNames(fromCatalog: Data(contentsOf: catalog))
 
         progress("Downloading \(frameworks.count) framework indexes…")
-        let files = Dictionary(uniqueKeysWithValues: frameworks.map {
+        var files = Dictionary(uniqueKeysWithValues: frameworks.map {
             ("\(DocsPaths.base)/index/\($0)", work.appendingPathComponent("\($0).json"))
         })
+        files[DocsPaths.swiftBookIndex] = work.appendingPathComponent("swift-book.json")
         try? download(files) // partial failures are reported below, not fatal
 
-        progress("Crawling the Human Interface Guidelines…")
-        let guides = (try? HIG.crawl(work: work, progress: progress)) ?? []
+        // Sources outside the catalog; each is optional, so one failing doesn't stop the build.
+        progress("Crawling the Human Interface Guidelines and tutorials…")
+        var guides = (try? HIG.crawl(work: work, progress: progress)) ?? []
+        guides += (try? Tutorials.crawl(work: work, progress: progress)) ?? []
+        progress("Reading the App Store Review Guidelines and WWDC sessions…")
+        guides += (try? ReviewGuidelines.pages(in: ReviewGuidelines.html(refresh: true))) ?? []
+        guides += (try? WWDC.crawl(work: work)) ?? []
 
         progress("Building the search index…")
         let temp = DocsPaths.directory.appendingPathComponent("docs.db.building")
@@ -96,10 +125,18 @@ public enum DocsIndex {
                 }
                 try insert(framework, data)
             }
+            if let book = try? Data(contentsOf: work.appendingPathComponent("swift-book.json")), !book.isEmpty {
+                try insert("swift-book", book)
+            }
         }
         _ = try FileManager.default.replaceItemAt(DocsPaths.indexDatabase, withItemAt: temp)
+        let counts = try SQLiteDatabase(path: DocsPaths.indexDatabase.path, readOnly: true).query(
+            "SELECT CASE WHEN framework IN \(specialSourcesSQL) THEN framework ELSE 'api' END, count(*) FROM docs GROUP BY 1") {
+            ($0.text(0), $0.int(1))
+        }
         return DocsIndexStatus(path: DocsPaths.indexDatabase.path, pages: pages, frameworks: frameworks.count - failed.count,
-                               failedFrameworks: failed, guidePages: guides.count, seconds: (Date().timeIntervalSince(start) * 10).rounded() / 10)
+                               failedFrameworks: failed, guidePages: guides.count,
+                               sources: Dictionary(counts, uniquingKeysWith: +), seconds: (Date().timeIntervalSince(start) * 10).rounded() / 10)
     }
 
     /// Framework identifiers from the technologies catalog (references to /documentation/<name>).
@@ -135,15 +172,15 @@ public enum DocsIndex {
     private static func insertGuides(_ db: SQLiteDatabase, _ guides: [GuidePage]) throws -> Int {
         let insertDoc = try db.prepare("""
             INSERT OR IGNORE INTO docs(path, title, kind, framework, lang, beta, deprecated, parent)
-            VALUES (?, ?, ?, 'hig', 'swift', 0, 0, ?)
+            VALUES (?, ?, ?, ?, 'swift', 0, 0, ?)
             """)
         let insertText = try db.prepare("INSERT INTO fts(rowid, title, terms, parent, framework) VALUES (last_insert_rowid(), ?, ?, ?, ?)")
         try db.transaction {
             for guide in guides {
-                try insertDoc.run([.text(guide.path), .text(guide.title), .text(guide.kind), .text(guide.parent)])
+                try insertDoc.run([.text(guide.path), .text(guide.title), .text(guide.kind), .text(guide.framework), .text(guide.parent)])
                 try insertText.run([
                     .text(guide.title), .text(splitWords(guide.title) + " " + splitWords(String(guide.path.split(separator: "/").last ?? ""))),
-                    .text(splitWords(guide.parent) + " " + guide.abstract.lowercased()), .text("hig human interface guidelines design"),
+                    .text(splitWords(guide.parent) + " " + guide.abstract.lowercased()), .text(sourceWords[guide.framework] ?? guide.framework),
                 ])
             }
         }
@@ -176,7 +213,7 @@ public enum DocsIndex {
                             node["external"] as? Bool != true
                         else { return }
                         let parts = path.split(separator: "/")
-                        let pageFramework = parts.count >= 2 ? String(parts[1]) : framework
+                        let pageFramework = framework == "swift-book" ? framework : (parts.count >= 2 ? String(parts[1]) : framework)
                         try insertDoc.run([
                             .text(path), .text(title), .text(kind), .text(pageFramework), .text(language),
                             .int(node["beta"] as? Bool == true ? 1 : 0), .int(node["deprecated"] as? Bool == true ? 1 : 0),
@@ -244,7 +281,10 @@ public enum DocsIndex {
 
     // MARK: Search
 
-    public static func search(_ query: String, framework: String? = nil, kind: String? = nil, limit: Int = 10) throws -> [DocsSearchResult] {
+    /// `excludeSources` limits results to API documentation (frameworks), leaving out the HIG,
+    /// tutorials, Swift book, Review Guidelines and WWDC sessions.
+    public static func search(_ query: String, framework: String? = nil, kind: String? = nil, limit: Int = 10,
+                              excludeSources: Bool = false) throws -> [DocsSearchResult] {
         let db = try SQLiteDatabase(path: DocsPaths.indexDatabase.path, readOnly: true)
         var tokens = splitWords(query).split(separator: " ").map(String.init)
         guard !tokens.isEmpty else { return [] }
@@ -265,13 +305,14 @@ public enum DocsIndex {
         if let h = hint, tokens.isEmpty { tokens = [h]; hint = nil }
 
         if let hint, framework == nil {
-            let boosted = try rankedSearch(db, tokens: tokens, framework: hint, kind: kind, limit: limit)
+            let boosted = try rankedSearch(db, tokens: tokens, framework: hint, kind: kind, limit: limit, excludeSources: excludeSources)
             if !boosted.isEmpty { return boosted }
         }
-        return try rankedSearch(db, tokens: tokens, framework: framework?.lowercased(), kind: kind, limit: limit)
+        return try rankedSearch(db, tokens: tokens, framework: framework?.lowercased(), kind: kind, limit: limit, excludeSources: excludeSources)
     }
 
-    private static func rankedSearch(_ db: SQLiteDatabase, tokens: [String], framework: String?, kind: String?, limit: Int) throws -> [DocsSearchResult] {
+    private static func rankedSearch(_ db: SQLiteDatabase, tokens: [String], framework: String?, kind: String?, limit: Int,
+                                     excludeSources: Bool = false) throws -> [DocsSearchResult] {
         struct Row {
             let result: DocsSearchResult
             let score: Double
@@ -286,6 +327,7 @@ public enum DocsIndex {
             var values: [SQLValue] = [.text(match)]
             if let framework { sql += " AND d.framework = ?"; values.append(.text(framework)) }
             if let kind { sql += " AND d.kind = ?"; values.append(.text(kind)) }
+            if excludeSources { sql += " AND d.framework NOT IN \(specialSourcesSQL)" }
             sql += " ORDER BY score LIMIT 400"
             return try db.query(sql, values) { s in
                 Row(result: DocsSearchResult(path: s.text(0), title: s.text(1), kind: s.text(2), framework: s.text(3),
@@ -305,7 +347,7 @@ public enum DocsIndex {
             var s = -row.score + (kindBoost[r.kind] ?? 0)
             if r.deprecated { s -= 3 }
             if r.language == "occ" { s -= 1 }
-            if r.framework == "hig" { s += 1 } // design guidance should surface for words like "slider"
+            s += sourceBoost[r.framework] ?? 0
             if tokens.contains(r.framework) || joinedTokens.contains(r.framework.replacingOccurrences(of: "-", with: "")) { s += 1 }
             s -= 0.15 * Double(r.path.filter { $0 == "/" }.count) // prefer shallower pages
             return s
