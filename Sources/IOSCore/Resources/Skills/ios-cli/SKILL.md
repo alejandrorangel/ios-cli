@@ -77,7 +77,7 @@ Physical devices need **Settings → Developer → Enable UI Automation**, and t
 
 ## SwiftUI previews
 
-- `ios preview Path/To/View.swift [--index N] [-o view.png]` — renders the file's `#Preview` (index 0 = first) to a PNG through Xcode. First render builds the project (~20 s+), then ~0.5 s. Look at the PNG to check a UI change without running the app.
+- `ios preview Path/To/View.swift [--name "Dark mode" | --index N] [-o view.png]` — renders one of the file's previews to a PNG through Xcode: by name (`#Preview("Dark mode")` or a `PreviewProvider` type; exact, else contains) or position (0 = first). `ios preview Path/To/View.swift --list` lists the file's previews instantly. First render builds the project (~20 s+), then ~0.5 s. Look at the PNG to check a UI change without running the app.
 - The output lists available variants and locales; pass them back: `--variant "Color Scheme=Dark Appearance" --variant "Dynamic Type=AX 5"`, `--locale fr`. Use this to check dark mode, large text and localizations.
 - Run from the project directory (or pass `--workspace` / `--project`).
 

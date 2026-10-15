@@ -30,7 +30,85 @@ public struct PreviewResult: Codable, Sendable {
     public let supportedVariants: [String: [String]]
 }
 
+/// A preview declared in a Swift file, in the order Xcode numbers them.
+public struct PreviewDefinition: Codable, Equatable, Sendable {
+    /// Position among the file's previews (RenderPreview's previewDefinitionIndexInFile).
+    public let index: Int
+    /// `#Preview("Name")`'s name, or the PreviewProvider type's name; nil for an unnamed #Preview.
+    public let name: String?
+    public let line: Int
+    /// "macro" (#Preview) or "provider" (PreviewProvider).
+    public let kind: String
+}
+
 public enum Previews {
+    /// The `#Preview` macros and `PreviewProvider` types in a Swift source, top to bottom, ignoring
+    /// comments. Xcode counts both kinds together when it numbers a file's previews.
+    public static func definitions(inSource source: String) -> [PreviewDefinition] {
+        var found: [(line: Int, column: Int, name: String?, kind: String)] = []
+        var inBlockComment = false
+        for (offset, rawLine) in source.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            let code = stripComments(String(rawLine), inBlockComment: &inBlockComment)
+            for match in code.matches(of: /#Preview\b(\s*\(\s*"((?:[^"\\]|\\.)*)")?/) {
+                let column = code.distance(from: code.startIndex, to: match.range.lowerBound)
+                found.append((offset + 1, column, match.output.2.map(String.init), "macro"))
+            }
+            for match in code.matches(of: /\b(?:struct|class|enum)\s+(\w+)\s*:[^{]*\bPreviewProvider\b/) {
+                let column = code.distance(from: code.startIndex, to: match.range.lowerBound)
+                found.append((offset + 1, column, String(match.output.1), "provider"))
+            }
+        }
+        return found.sorted { ($0.line, $0.column) < ($1.line, $1.column) }.enumerated().map { index, item in
+            PreviewDefinition(index: index, name: item.name, line: item.line, kind: item.kind)
+        }
+    }
+
+    /// The code part of a line: drops `//` comments and `/* */` blocks (tracked across lines),
+    /// leaving string literals alone.
+    static func stripComments(_ line: String, inBlockComment: inout Bool) -> String {
+        var out = ""
+        var inString = false
+        var chars = Array(line)
+        var i = 0
+        while i < chars.count {
+            let c = chars[i], next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
+            if inBlockComment {
+                if c == "*", next == "/" { inBlockComment = false; i += 2 } else { i += 1 }
+                continue
+            }
+            if inString {
+                out.append(c)
+                if c == "\\", let next { out.append(next); i += 2; continue }
+                if c == "\"" { inString = false }
+                i += 1
+                continue
+            }
+            if c == "/", next == "/" { break }
+            if c == "/", next == "*" { inBlockComment = true; i += 2; continue }
+            if c == "\"" { inString = true }
+            out.append(c)
+            i += 1
+        }
+        chars.removeAll()
+        return out
+    }
+
+    /// The position of the preview called `name`: exact (case-insensitive) match first, then the one
+    /// whose name contains it. Throws with the available names if none or several match.
+    public static func index(named name: String, in definitions: [PreviewDefinition]) throws -> Int {
+        let named = definitions.filter { $0.name != nil }
+        let exact = named.filter { $0.name!.caseInsensitiveCompare(name) == .orderedSame }
+        let matches = exact.isEmpty ? named.filter { $0.name!.localizedCaseInsensitiveContains(name) } : exact
+        guard matches.count == 1 else {
+            throw IOSError.previewNotFound(name: name, available: definitions.map(describe), ambiguous: matches.count > 1)
+        }
+        return matches[0].index
+    }
+
+    public static func describe(_ definition: PreviewDefinition) -> String {
+        "\(definition.index): \(definition.name.map { "\"\($0)\"" } ?? "(unnamed #Preview)") — line \(definition.line)"
+    }
+
     /// Renders a SwiftUI preview through Xcode and copies the snapshot to `output`.
     public static func render(_ request: PreviewRequest, output: String) throws -> PreviewResult {
         let bridge = try XcodeBridge()

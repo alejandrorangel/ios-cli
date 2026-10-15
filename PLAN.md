@@ -364,6 +364,8 @@ Finding: a device's unified log can't be read without root (`log: Must be root t
 | `preview SampleApp/ContentView.swift` | 20.3 s cold (builds), 0.37–0.51 s warm; lists variants (color scheme, contrast, control borders, Dynamic Type, orientation) and locales; `--variant "Color Scheme=Dark Appearance" --variant "Dynamic Type=AX 5"` verified visually |
 | created project → `describe` / `run` / `layout` | single scheme picked automatically; run 24.7 s (first build); layout shows the template's globe and "Hello, world!" |
 
+`--name` / `--list` (v0.3.5, the counterpart of `android studio render-compose-preview <file> <composable>`): the Swift file is scanned for `#Preview` macros (with their string names) and `PreviewProvider` types in source order, skipping comments — the order Xcode uses for `previewDefinitionIndexInFile`; names match exactly, else by "contains", with the file's previews listed on a miss or ambiguity. Android's `--print-semantics` has no counterpart (Xcode's preview tool returns only the image); `ios layout` / `--voiceover` on a running screen cover that need.
+
 Findings: `RenderPreview` needs the file's project-navigator path, found via `XcodeGlob` by file name and matched on trailing folders; the approval dialog is only triggered by opening or creating a project (`XcodeListTemplates` alone just fails), so the error message tells the user which command triggers it; the approval carried over to rebuilt debug binaries and the installed release binary (so the per-binary-hash concern from Spike B didn't show up in practice). 47 unit tests.
 
 **Field fixes from the first real use (2026-10-15)**, reported by an agent session working on the test app on the iPad:

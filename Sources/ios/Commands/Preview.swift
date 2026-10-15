@@ -23,8 +23,14 @@ struct Preview: ParsableCommand {
     @Argument(help: "Swift file containing the preview.")
     var file: String
 
-    @Option(help: "Which preview in the file (0 = first #Preview or PreviewProvider).")
-    var index = 0
+    @Option(help: "Which preview in the file by position (0 = first #Preview or PreviewProvider).")
+    var index: Int?
+
+    @Option(help: "Which preview by name: #Preview(\"Name\") or a PreviewProvider type (exact, else contains).")
+    var name: String?
+
+    @Flag(help: "List the file's previews (position, name, line) without rendering.")
+    var list = false
 
     @Option(help: "Locale to render in, e.g. fr or ja (from a previous render's supported locales).")
     var locale: String?
@@ -38,7 +44,19 @@ struct Preview: ParsableCommand {
     @Option(help: "Seconds to wait for the render.")
     var timeout = 180
 
+    func validate() throws {
+        if index != nil && name != nil { throw ValidationError("Pass --index or --name, not both.") }
+    }
+
     func run() throws {
+        let definitions = Previews.definitions(inSource: (try? String(contentsOfFile: file, encoding: .utf8)) ?? "")
+        if list {
+            try Output.emit(definitions, json: global.json) {
+                definitions.isEmpty ? "No #Preview or PreviewProvider in \(file)." : definitions.map(Previews.describe).joined(separator: "\n")
+            }
+            return
+        }
+        let position = try name.map { try Previews.index(named: $0, in: definitions) } ?? index ?? 0
         let container = try ProjectLocator.locate(workspace: workspace, project: project,
                                                   directory: FileManager.default.currentDirectoryPath)
         var variants: [String: String] = [:]
@@ -50,9 +68,9 @@ struct Preview: ParsableCommand {
         let base = ((file as NSString).lastPathComponent as NSString).deletingPathExtension
         let destination = output ?? "\(base)-preview.png"
 
-        Docs.progress("Rendering \(base) preview #\(index) with Xcode…")
+        Docs.progress("Rendering \(base) preview #\(position)\(name.map { " (\"\($0)\")" } ?? "") with Xcode…")
         let result = try Previews.render(
-            PreviewRequest(container: container, file: file, index: index, locale: locale, variants: variants, timeout: timeout),
+            PreviewRequest(container: container, file: file, index: position, locale: locale, variants: variants, timeout: timeout),
             output: destination
         )
         try Output.emit(result, json: global.json) {

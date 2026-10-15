@@ -32,12 +32,16 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
     case swiftUIDumpFailed(reason: String)
     case bridgeNotApproved(detail: String)
     case bridgeFailed(tool: String, message: String)
+    case previewNotFound(name: String, available: [String], ambiguous: Bool)
     case skillNotFound(name: String, available: [String])
     case skillExists(path: String)
     case skillNotInstalled(name: String, directory: String)
 
     public var description: String {
         switch self {
+        case let .previewNotFound(name, available, ambiguous):
+            return (ambiguous ? "Several previews match '\(name)'; use a more specific name or --index."
+                              : "No preview named '\(name)' in this file.") + Self.list(available, heading: "Previews")
         case let .skillNotFound(name, available):
             return "No skill named '\(name)'." + Self.list(available, heading: "Available")
         case let .skillExists(path):

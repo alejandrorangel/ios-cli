@@ -91,7 +91,7 @@ All planned commands work. Every command accepts `--json` for machine-readable o
 
 | Command | What it does |
 |---|---|
-| `ios preview <File.swift> [--index N] [--variant "Color Scheme=Dark Appearance"] [--locale fr] [-o out.png]` | Renders a SwiftUI `#Preview` to PNG through Xcode (first render builds, ~20 s; then ~0.5 s); lists available variants and locales |
+| `ios preview <File.swift> [--name N \| --index N] [--variant "Color Scheme=Dark Appearance"] [--locale fr] [-o out.png]` | Renders a SwiftUI `#Preview` to PNG through Xcode (first render builds, ~20 s; then ~0.5 s); lists available variants and locales. Pick the preview by name (`#Preview("Dark mode")` or a `PreviewProvider`) or position; `--list` shows a file's previews without rendering |
 | `ios create <Name> [--template app] [--storage swiftdata] [--testing swift-testing] [--org com.example]` | New project from Xcode's own templates (`app`, `ios-app`, `document-app`, `game`, `framework` or any identifier); `--list-templates` shows them with their options |
 
 ### Documentation
