@@ -182,6 +182,9 @@ final class RunnerUITests: XCTestCase {
             keyboardFocus = focused.exists ? (focused.elementType, focused.frame) : nil
             return node(try Self.fullSnapshot(target))
 
+        case "voiceover":
+            return try voiceOverWalk(maxSteps: Int(argument) ?? 200)
+
         case "snapshot-public":
             // Diagnostic: XCTest's public snapshot (modal pruning on), to compare with "snapshot".
             return node(try currentApp().snapshot())
@@ -228,6 +231,40 @@ final class RunnerUITests: XCTestCase {
         default:
             throw RunnerError(message: "unknown command: \(line)")
         }
+    }
+
+    /// What VoiceOver reads on the current screen, in navigation order (Xcode 27's public
+    /// XCUIVoiceOverService). Elements hidden from accessibility don't appear, unlike in snapshots.
+    /// VoiceOver is switched back off afterwards if this turned it on, since it changes how taps work.
+    func voiceOverWalk(maxSteps: Int) throws -> [String: Any] {
+        guard #available(iOS 27.0, *) else { throw RunnerError(message: "reading with VoiceOver needs iOS 27 or later on the target") }
+        let service = XCUIDevice.shared.voiceOverService
+        let wasEnabled = service.isEnabled
+        if !wasEnabled {
+            try service.enable()
+            Thread.sleep(forTimeInterval: 1) // let VoiceOver settle on the first element
+        }
+        defer { if !wasEnabled { try? service.disable() } }
+
+        var spoken: [String] = []
+        if let first = try? service.currentSpeech().utterance, !first.isEmpty { spoken.append(first) }
+        var same = 0
+        var stoppedAtEnd = false
+        for _ in 0..<maxSteps {
+            guard let next = try? service.moveForward().utterance, !next.isEmpty else { continue }
+            // At the last element VoiceOver stays put and repeats it; three in a row means the end
+            // (two identical neighbours, like two "Mute, button" rows, are still recorded).
+            if next == spoken.last {
+                same += 1
+                if same >= 2 { stoppedAtEnd = true; break }
+            } else {
+                same = 0
+            }
+            spoken.append(next)
+        }
+        // Drop the repeats recorded while detecting the end.
+        while stoppedAtEnd, spoken.count >= 2, spoken[spoken.count - 1] == spoken[spoken.count - 2] { spoken.removeLast() }
+        return ["spoken": spoken, "complete": stoppedAtEnd, "voiceOverWasOn": wasEnabled]
     }
 
     var currentBundle = ""

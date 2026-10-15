@@ -69,8 +69,31 @@ struct LayoutCommand: ParsableCommand {
     @Flag(help: "With --swiftui: print SwiftUI's unfiltered debug data (large).")
     var raw = false
 
+    @Flag(help: "List what VoiceOver reads, in its navigation order (iOS 27+). Elements hidden from accessibility don't appear. Turns VoiceOver on for the walk and back off after.")
+    var voiceover = false
+
+    @Option(help: "With --voiceover: maximum number of elements to visit.")
+    var max = 200
+
+    struct VoiceOverResult: Encodable {
+        let spoken: [String]
+        /// False when the walk stopped at --max before reaching the last element.
+        let complete: Bool
+    }
+
     func run() throws {
         if swiftui { return try runSwiftUI() }
+        if voiceover {
+            let reply = try automation.session().send("voiceover \(max)", timeout: 900).result as? [String: Any] ?? [:]
+            let result = VoiceOverResult(spoken: reply["spoken"] as? [String] ?? [], complete: reply["complete"] as? Bool ?? false)
+            try Output.emit(result, json: global.json) {
+                var lines = result.spoken.enumerated().map { "\($0.offset + 1). \($0.element)" }
+                if lines.isEmpty { lines = ["VoiceOver read nothing (the app may still be loading)."] }
+                if !result.complete { lines.append("… stopped after \(max) elements (raise --max to continue)") }
+                return lines.joined(separator: "\n")
+            }
+            return
+        }
         let tree = try snapshot(automation.session())
         if full {
             try Output.emit(tree, json: global.json) { treeText(tree) }
