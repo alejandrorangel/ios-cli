@@ -8,6 +8,7 @@ public enum DocsPage {
     public static func normalizePath(_ input: String) -> String {
         var path = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if path.hasPrefix("doc://") { path = "/documentation/" + path.dropFirst("doc://".count) }
+        if path.hasPrefix("hig://") { path = HIG.root + "/" + path.dropFirst("hig://".count) }
         path = path.replacing(/^https?:\/\/developer\.apple\.com/, with: "")
         if !path.hasPrefix("/") { path = "/documentation/" + path }
         while path.hasSuffix("/") { path.removeLast() }
@@ -134,7 +135,9 @@ public enum DocsPage {
                 : (ref["title"] as? String ?? String(identifier.split(separator: "/").last ?? ""))
             let url = ref["url"] as? String ?? ""
             if ref["type"] as? String == "link" { return "[\(title)](\(url))" }
-            if url.hasPrefix("/documentation/") { return "[`\(title)`](\(DocsPaths.docURL(forPath: url)))" }
+            if url.hasPrefix("/documentation/") || url.hasPrefix(HIG.root) {
+                return "[`\(title)`](\(DocsPaths.docURL(forPath: String(url.prefix { $0 != "#" }))))"
+            }
             return "`\(title)`"
         }
 

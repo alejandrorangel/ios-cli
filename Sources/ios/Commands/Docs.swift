@@ -4,7 +4,7 @@ import IOSCore
 
 struct Docs: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Search and read Apple developer documentation, and look up SDK APIs.",
+        abstract: "Search and read Apple developer documentation and the Human Interface Guidelines, and look up SDK APIs.",
         subcommands: [Search.self, Fetch.self, API.self, Update.self]
     )
 
@@ -15,8 +15,8 @@ struct Docs: ParsableCommand {
 
     struct Search: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Search Apple's documentation (titles and paths, all frameworks).",
-            discussion: "The first search downloads and indexes Apple's documentation catalog (~140 MB, ~30 s). Results link to pages as doc://… for `ios docs fetch`."
+            abstract: "Search Apple's documentation (all frameworks) and the Human Interface Guidelines.",
+            discussion: "The first search downloads and indexes Apple's documentation catalog and the HIG (~140 MB, ~30 s). Results link to pages as doc://… (API docs) or hig://… (guidelines) for `ios docs fetch`."
         )
 
         @OptionGroup var global: GlobalOptions
@@ -26,6 +26,9 @@ struct Docs: ParsableCommand {
 
         @Option(help: "Only this framework, e.g. swiftui or uikit.")
         var framework: String?
+
+        @Flag(help: "Only the Human Interface Guidelines (design guidance, e.g. \"sliders\", \"dark mode\").")
+        var hig = false
 
         @Option(help: "Only this page kind, e.g. struct, class, protocol, method, article, sampleCode.")
         var kind: String?
@@ -38,7 +41,7 @@ struct Docs: ParsableCommand {
                 let status = try DocsIndex.update(progress: Docs.progress)
                 Docs.progress("Indexed \(status.pages) pages from \(status.frameworks) frameworks in \(status.seconds)s.")
             }
-            let results = try DocsIndex.search(query.joined(separator: " "), framework: framework, kind: kind, limit: limit)
+            let results = try DocsIndex.search(query.joined(separator: " "), framework: hig ? "hig" : framework, kind: kind, limit: limit)
             try Output.emit(results, json: global.json) {
                 guard !results.isEmpty else { return "No results." }
                 return results.enumerated().map { index, r in
@@ -55,7 +58,7 @@ struct Docs: ParsableCommand {
     struct Fetch: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Show a documentation page as markdown.",
-            discussion: "Accepts doc://swiftui/view, swiftui/view, /documentation/swiftui/view or a developer.apple.com URL. Pages are cached for 7 days."
+            discussion: "Accepts doc://swiftui/view, swiftui/view, hig://sliders, /documentation/swiftui/view or a developer.apple.com URL (including Human Interface Guidelines pages). Pages are cached for 7 days."
         )
 
         @OptionGroup var global: GlobalOptions
@@ -115,7 +118,7 @@ struct Docs: ParsableCommand {
         func run() throws {
             let status = try DocsIndex.update(progress: Docs.progress)
             try Output.emit(status, json: global.json) {
-                var text = "Indexed \(status.pages) pages from \(status.frameworks) frameworks in \(status.seconds)s.\n\(status.path)"
+                var text = "Indexed \(status.pages) pages from \(status.frameworks) frameworks and \(status.guidePages) Human Interface Guidelines pages in \(status.seconds)s.\n\(status.path)"
                 if !status.failedFrameworks.isEmpty {
                     text += "\nNot downloaded: \(status.failedFrameworks.joined(separator: ", "))"
                 }

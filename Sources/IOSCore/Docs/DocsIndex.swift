@@ -20,6 +20,8 @@ public struct DocsIndexStatus: Codable, Sendable {
     public let pages: Int
     public let frameworks: Int
     public let failedFrameworks: [String]
+    /// Human Interface Guidelines pages (crawled; searchable with --hig).
+    public let guidePages: Int
     public let seconds: Double
 }
 
@@ -36,8 +38,12 @@ public enum DocsPaths {
     static let userAgent = "ios-cli/0.1"
     static let base = "https://developer.apple.com/tutorials/data"
 
+    /// `doc://swiftui/view` for API docs, `hig://sliders` for the Human Interface Guidelines.
     public static func docURL(forPath path: String) -> String {
-        path.hasPrefix("/documentation/") ? "doc://" + path.dropFirst("/documentation/".count) : path
+        if path.hasPrefix("/documentation/") { return "doc://" + path.dropFirst("/documentation/".count) }
+        if path.hasPrefix(HIG.root + "/") { return "hig://" + path.dropFirst(HIG.root.count + 1) }
+        if path == HIG.root { return "hig://" }
+        return path
     }
 }
 
@@ -74,11 +80,14 @@ public enum DocsIndex {
         })
         try? download(files) // partial failures are reported below, not fatal
 
+        progress("Crawling the Human Interface Guidelines…")
+        let guides = (try? HIG.crawl(work: work, progress: progress)) ?? []
+
         progress("Building the search index…")
         let temp = DocsPaths.directory.appendingPathComponent("docs.db.building")
         try? FileManager.default.removeItem(at: temp)
         var failed: [String] = []
-        let pages = try build(database: temp.path) { insert in
+        let pages = try build(database: temp.path, guides: guides) { insert in
             for framework in frameworks {
                 let file = work.appendingPathComponent("\(framework).json")
                 guard let data = try? Data(contentsOf: file), !data.isEmpty else {
@@ -90,7 +99,7 @@ public enum DocsIndex {
         }
         _ = try FileManager.default.replaceItemAt(DocsPaths.indexDatabase, withItemAt: temp)
         return DocsIndexStatus(path: DocsPaths.indexDatabase.path, pages: pages, frameworks: frameworks.count - failed.count,
-                               failedFrameworks: failed, seconds: (Date().timeIntervalSince(start) * 10).rounded() / 10)
+                               failedFrameworks: failed, guidePages: guides.count, seconds: (Date().timeIntervalSince(start) * 10).rounded() / 10)
     }
 
     /// Framework identifiers from the technologies catalog (references to /documentation/<name>).
@@ -108,7 +117,7 @@ public enum DocsIndex {
     }
 
     /// Creates the schema and inserts every page `feed` provides; returns the page count.
-    static func build(database path: String, feed: ((String, Data) throws -> Void) throws -> Void) throws -> Int {
+    static func build(database path: String, guides: [GuidePage] = [], feed: ((String, Data) throws -> Void) throws -> Void) throws -> Int {
         let db = try SQLiteDatabase(path: path)
         try db.execute("""
             CREATE TABLE docs(id INTEGER PRIMARY KEY, path TEXT UNIQUE, title TEXT, kind TEXT, framework TEXT,
@@ -116,9 +125,29 @@ public enum DocsIndex {
             CREATE INDEX docs_framework ON docs(framework);
             CREATE VIRTUAL TABLE fts USING fts5(title, terms, parent, framework, content='', tokenize='porter unicode61');
             """)
-        let count = try insertPages(db, feed: feed)
+        let count = try insertPages(db, feed: feed) + insertGuides(db, guides)
         try db.execute("VACUUM")
         return count
+    }
+
+    /// HIG pages go in as framework "hig". Their abstract is added to the low-weight parent
+    /// column, which helps queries like "slider" or "dark mode" without outranking titles.
+    private static func insertGuides(_ db: SQLiteDatabase, _ guides: [GuidePage]) throws -> Int {
+        let insertDoc = try db.prepare("""
+            INSERT OR IGNORE INTO docs(path, title, kind, framework, lang, beta, deprecated, parent)
+            VALUES (?, ?, ?, 'hig', 'swift', 0, 0, ?)
+            """)
+        let insertText = try db.prepare("INSERT INTO fts(rowid, title, terms, parent, framework) VALUES (last_insert_rowid(), ?, ?, ?, ?)")
+        try db.transaction {
+            for guide in guides {
+                try insertDoc.run([.text(guide.path), .text(guide.title), .text(guide.kind), .text(guide.parent)])
+                try insertText.run([
+                    .text(guide.title), .text(splitWords(guide.title) + " " + splitWords(String(guide.path.split(separator: "/").last ?? ""))),
+                    .text(splitWords(guide.parent) + " " + guide.abstract.lowercased()), .text("hig human interface guidelines design"),
+                ])
+            }
+        }
+        return guides.count
     }
 
     /// Kept separate so its prepared statements are finalized before VACUUM, which refuses
@@ -276,6 +305,7 @@ public enum DocsIndex {
             var s = -row.score + (kindBoost[r.kind] ?? 0)
             if r.deprecated { s -= 3 }
             if r.language == "occ" { s -= 1 }
+            if r.framework == "hig" { s += 1 } // design guidance should surface for words like "slider"
             if tokens.contains(r.framework) || joinedTokens.contains(r.framework.replacingOccurrences(of: "-", with: "")) { s += 1 }
             s -= 0.15 * Double(r.path.filter { $0 == "/" }.count) // prefer shallower pages
             return s

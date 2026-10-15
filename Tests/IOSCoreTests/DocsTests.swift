@@ -24,6 +24,50 @@ private func words(_ s: String) -> [String] {
     #expect(DocsPaths.docURL(forPath: "/documentation/swiftui/view") == "doc://swiftui/view")
 }
 
+@Test func handlesHumanInterfaceGuidelinesPaths() {
+    #expect(DocsPage.normalizePath("hig://sliders") == "/design/human-interface-guidelines/sliders")
+    #expect(DocsPage.normalizePath("hig://") == "/design/human-interface-guidelines")
+    #expect(DocsPage.normalizePath("https://developer.apple.com/design/human-interface-guidelines/sliders")
+            == "/design/human-interface-guidelines/sliders")
+    #expect(DocsPaths.docURL(forPath: "/design/human-interface-guidelines/dark-mode") == "hig://dark-mode")
+    #expect(DocsPaths.docURL(forPath: "/design/human-interface-guidelines") == "hig://")
+}
+
+@Test func parsesHIGPagesAndTheirLinks() throws {
+    let page = #"""
+    {"metadata": {"title": "Sliders", "role": "article"},
+     "abstract": [{"type": "text", "text": "A slider is a horizontal track with a control."}],
+     "references": {
+       "a": {"type": "topic", "url": "/design/human-interface-guidelines/steppers", "title": "Steppers"},
+       "b": {"type": "topic", "url": "/design/human-interface-guidelines/Text-Fields#best-practices", "title": "Text fields"},
+       "c": {"type": "topic", "url": "/documentation/swiftui/slider", "title": "Slider"},
+       "d": {"type": "image", "url": "/images/slider.png"}
+     }}
+    """#
+    let (guide, links) = try #require(HIG.parse(Data(page.utf8), path: "/design/human-interface-guidelines/sliders", parent: "Selection and input"))
+    #expect(guide.title == "Sliders")
+    #expect(guide.kind == "article")
+    #expect(guide.parent == "Selection and input")
+    #expect(guide.abstract == "A slider is a horizontal track with a control.")
+    // Only HIG pages are followed; fragments are dropped and paths lowercased.
+    #expect(links == ["/design/human-interface-guidelines/steppers", "/design/human-interface-guidelines/text-fields"])
+}
+
+@Test func linksGuidelinePagesInMarkdown() throws {
+    let page = #"""
+    {"metadata": {"title": "Sliders"},
+     "primaryContentSections": [{"kind": "content", "content": [
+       {"type": "paragraph", "inlineContent": [{"type": "text", "text": "See "}, {"type": "reference", "identifier": "s"},
+                                               {"type": "text", "text": " and "}, {"type": "reference", "identifier": "u"}]}]}],
+     "references": {
+       "s": {"title": "Steppers", "url": "/design/human-interface-guidelines/steppers"},
+       "u": {"title": "UISlider", "url": "/documentation/uikit/uislider"}
+     }}
+    """#
+    let markdown = try DocsPage.toMarkdown(Data(page.utf8))
+    #expect(markdown.contains("See [`Steppers`](hig://steppers) and [`UISlider`](doc://uikit/uislider)"))
+}
+
 @Test func readsFrameworkNamesFromCatalog() throws {
     let catalog = #"""
     {"references": {

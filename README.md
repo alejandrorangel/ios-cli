@@ -18,8 +18,8 @@ Skeleton (Phase 2 start). Working commands:
 | `ios install <path.app> [--device D] [--launch]` | Install an app bundle (bundle ID read from its Info.plist) |
 | `ios logs --bundle-id B [--device D] [--last 5m \| --launch] [--duration N]` | App logs. Simulator: follow or show the unified log. `--launch`: relaunch with the console attached (captures `print()`; required on devices, where the unified log needs root). `--json` prints NDJSON |
 
-| `ios docs search <words> [--framework F] [--kind K]` | Searches all of Apple's documentation (363k pages). The first search downloads and indexes the catalog (~20 s) |
-| `ios docs fetch <doc://…\|path\|URL>` | A documentation page as markdown, with `doc://` links to follow; cached 7 days |
+| `ios docs search <words> [--framework F] [--kind K] [--hig]` | Searches all of Apple's documentation (363k pages) and the Human Interface Guidelines (172 pages; `--hig` for those only). The first search builds the index (~30 s) |
+| `ios docs fetch <doc://…\|hig://…\|path\|URL>` | A documentation or HIG page as markdown, with `doc://` / `hig://` links to follow; cached 7 days |
 | `ios docs api <Module.Symbol>` | Declaration, availability and doc comment from the installed SDK (offline; a module is extracted on first use, ~3–12 s) |
 | `ios docs update` | Rebuild the search index |
 | `ios layout [--bundle-id B] [--device D] [--full]` | Visible elements with type, identifier, label, value, state and tap point |
