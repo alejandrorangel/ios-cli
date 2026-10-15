@@ -73,6 +73,7 @@ All planned commands work. Every command accepts `--json` for machine-readable o
 | `ios describe [--scheme S]` | Schemes; with a scheme, the apps it builds (bundle ID, product path). Cached until project files change |
 | `ios build --scheme S [--platform simulator\|device]` | Builds and summarizes errors and warnings (file, line, column); full log saved to a file; exits non-zero on failure |
 | `ios run --scheme S [--no-build]` | Build, boot the simulator if needed, install, launch (restarting the app); reports the PID |
+| `ios test --scheme S [--only T/Suite/test] [--skip …] [--test-plan P] [--no-build] [--retries N]` | Runs unit and UI tests; lists each failure with file:line and an id to pass back to `--only`; saves the log and `.xcresult`; exits non-zero on failure |
 | `ios install <path.app> [--launch]` | Install an app bundle (bundle ID read from its Info.plist) |
 | `ios logs --bundle-id B [--last 5m] [--launch] [--duration N]` | App logs. Simulator: follow or show the unified log. `--launch`: relaunch with the console attached (captures `print()`; required on devices, where the unified log needs root). `--json` prints NDJSON |
 

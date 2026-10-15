@@ -9,7 +9,8 @@ public struct Diagnostic: Codable, Equatable, Sendable {
 
     public var summary: String {
         guard let file else { return "\(severity): \(message)" }
-        return "\(file):\(line ?? 0):\(column ?? 0): \(severity): \(message)"
+        guard let line else { return "\(file): \(severity): \(message)" }
+        return "\(file):\(line):\(column ?? 0): \(severity): \(message)"
     }
 }
 
@@ -81,6 +82,8 @@ public enum Builder {
     }
 
     nonisolated(unsafe) private static let located = /^(.+?):(\d+):(\d+): (error|warning): (.+)$/
+    /// Project-level problems, e.g. "/x/App.xcodeproj: error: Signing for "App" requires a development team."
+    nonisolated(unsafe) private static let fileOnly = /^(\/.+?): (error|warning): (.+)$/
     nonisolated(unsafe) private static let bare = /^(?:xcodebuild: )?(error|warning): (.+)$/
 
     /// Extracts compiler/tool diagnostics from an xcodebuild log, de-duplicated
@@ -94,6 +97,8 @@ public enum Builder {
             if let m = try? located.wholeMatch(in: line) {
                 diagnostic = Diagnostic(severity: String(m.4), message: String(m.5), file: String(m.1),
                                         line: Int(m.2), column: Int(m.3))
+            } else if let m = try? fileOnly.wholeMatch(in: line) {
+                diagnostic = Diagnostic(severity: String(m.2), message: String(m.3), file: String(m.1), line: nil, column: nil)
             } else if let m = try? bare.wholeMatch(in: line) {
                 diagnostic = Diagnostic(severity: String(m.1), message: String(m.2), file: nil, line: nil, column: nil)
             } else {

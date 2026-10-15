@@ -6,6 +6,11 @@ private func sim(_ udid: String, _ name: String, booted: Bool = false) -> Simula
               runtime: "iOS", osVersion: "27.0", deviceType: nil)
 }
 
+private func sim(_ udid: String, _ name: String, os: String) -> Simulator {
+    Simulator(udid: udid, name: name, state: "Shutdown", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-\(os)",
+              osVersion: os, deviceType: nil)
+}
+
 private func device(_ udid: String, _ name: String, connected: Bool = true) -> PhysicalDevice {
     PhysicalDevice(udid: udid, name: name, model: nil, osVersion: "27.0.1",
                    connectionState: connected ? "connected" : "unavailable",
@@ -41,4 +46,14 @@ private func device(_ udid: String, _ name: String, connected: Bool = true) -> P
     #expect(throws: IOSError.self) {
         try TargetResolver.resolve("nope", simulators: [sim("SIM-A", "iPhone 17")], devices: [])
     }
+}
+
+@Test func testsDefaultToASimulatorNeverADevice() throws {
+    // Booted simulator wins.
+    #expect(try TargetResolver.defaultSimulator([sim("SIM-A", "iPhone 17", booted: true), sim("SIM-B", "iPhone 18")]).udid == "SIM-A")
+    // None booted: first iPhone (by name) on the newest iOS; 27 sorts above 9 numerically.
+    let sims = [sim("OLD", "iPhone 8", os: "9.3"), sim("PRO", "iPhone 17 Pro", os: "27.0"),
+                sim("BASE", "iPhone 17", os: "27.0"), sim("IPAD", "iPad Air", os: "27.0"), sim("MID", "iPhone 16", os: "26.5")]
+    #expect(try TargetResolver.defaultSimulator(sims).udid == "BASE")
+    #expect(throws: IOSError.self) { try TargetResolver.defaultSimulator([]) }
 }

@@ -30,6 +30,29 @@ public enum TargetResolver {
         try resolve(query, simulators: SimulatorList.load(), devices: DeviceList.load())
     }
 
+    /// Like `resolve`, but with no query it never picks a physical device (tests install and run
+    /// there, which disturbs whoever is using it): the booted simulator, else the first iPhone on
+    /// the newest iOS runtime, which xcodebuild boots.
+    public static func resolveSimulatorFirst(_ query: String?) throws -> Target {
+        guard query == nil else { return try resolve(query) }
+        return try defaultSimulator(SimulatorList.load())
+    }
+
+    public static func defaultSimulator(_ simulators: [Simulator]) throws -> Target {
+        let booted = simulators.filter(\.isBooted)
+        if booted.count == 1 { return .simulator(booted[0]) }
+        if booted.count > 1 { throw IOSError.ambiguousDevice(query: nil, candidates: booted.map { Target.simulator($0).label }) }
+        let iPhones = simulators.filter { $0.runtime.contains("iOS") && $0.name.hasPrefix("iPhone") }
+        let newest = iPhones.max { versionParts($0.osVersion) .lexicographicallyPrecedes(versionParts($1.osVersion)) }
+        guard let newest else { throw IOSError.ambiguousDevice(query: nil, candidates: simulators.map { Target.simulator($0).label }) }
+        let pick = iPhones.filter { $0.osVersion == newest.osVersion }.min { $0.name < $1.name }!
+        return .simulator(pick)
+    }
+
+    private static func versionParts(_ version: String?) -> [Int] {
+        (version ?? "").split(separator: ".").map { Int($0) ?? 0 }
+    }
+
     /// Resolution order: exact UDID, then case-insensitive name. With no query, the single
     /// booted simulator or connected device is used; anything else is ambiguous.
     public static func resolve(_ query: String?, simulators: [Simulator], devices: [PhysicalDevice]) throws -> Target {
