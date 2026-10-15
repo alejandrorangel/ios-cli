@@ -90,12 +90,25 @@ public enum SymbolStore {
                             [.text(module), .text("%" + path + "%"), .int(limit)]) { (row($0), 3) }
     }
 
-    /// Framework names in the iOS simulator SDK (plus the Swift standard library).
+    /// Framework names in the iOS simulator SDK and the platform's developer frameworks (XCTest,
+    /// XCUIAutomation, Testing), plus the Swift standard library.
     static func sdkModuleNames() throws -> [String] {
         let sdk = try Shell.checked("/usr/bin/xcrun", ["--sdk", "iphonesimulator", "--show-sdk-path"]).stdoutString
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let frameworks = (try? FileManager.default.contentsOfDirectory(atPath: sdk + "/System/Library/Frameworks")) ?? []
-        return frameworks.filter { $0.hasSuffix(".framework") }.map { String($0.dropLast(".framework".count)) } + ["Swift"]
+        let names = { (dir: String) in
+            ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+                .filter { $0.hasSuffix(".framework") && !$0.hasPrefix("_") }.map { String($0.dropLast(".framework".count)) }
+        }
+        let developer = (try? developerSearchPaths().frameworks).map(names) ?? []
+        return names(sdk + "/System/Library/Frameworks") + developer + ["Swift"]
+    }
+
+    /// The test frameworks ship with the platform, outside the SDK: Developer/Library/Frameworks for
+    /// XCTest, XCUIAutomation and Testing, and Developer/usr/lib for XCTest's Swift module.
+    static func developerSearchPaths() throws -> (frameworks: String, libraries: String) {
+        let platform = try Shell.checked("/usr/bin/xcrun", ["--sdk", "iphonesimulator", "--show-sdk-platform-path"]).stdoutString
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (platform + "/Developer/Library/Frameworks", platform + "/Developer/usr/lib")
     }
 
     private static func companionCore(of module: String) throws -> String? {
@@ -136,7 +149,7 @@ public enum SymbolStore {
         let result = try Shell.run("/usr/bin/xcrun", [
             "swift-symbolgraph-extract", "-module-name", module, "-target", "arm64-apple-ios\(version)-simulator",
             "-sdk", sdk, "-output-dir", out.path, "-minimum-access-level", "public",
-        ])
+        ] + ((try? developerSearchPaths()).map { ["-F", $0.frameworks, "-I", $0.libraries] } ?? []))
         let files = (try? FileManager.default.contentsOfDirectory(at: out, includingPropertiesForKeys: nil))?
             .filter { $0.lastPathComponent.hasSuffix(".symbols.json") } ?? []
         guard result.status == 0, !files.isEmpty else {

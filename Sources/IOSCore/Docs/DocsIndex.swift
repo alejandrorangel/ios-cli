@@ -78,6 +78,56 @@ public enum DocsIndex {
     /// without outranking an exact API match.
     static let sourceBoost: [String: Double] = ["hig": 1, "tutorials": 0.5, "swift-book": 0.5]
 
+    /// Everyday words → the words Apple's API names use instead, so intent queries find the symbol
+    /// ("push notification register" → registerForRemoteNotifications). Kept small: each entry widens matches.
+    static let synonyms: [String: [String]] = [
+        "push": ["remote"],
+        "login": ["sign", "signin"],
+    ]
+
+    /// Penalty for pages of frameworks that exist on other Apple platforms but not on iOS (AppKit,
+    /// WatchKit, TVMLKit, DriverKit…), so iOS answers come first. Asking for the framework by name
+    /// (`--framework appkit`, "appkit table view") still finds them.
+    static let otherPlatformPenalty = 4.0
+
+    /// Documentation-only technologies for other platforms that aren't SDK frameworks.
+    static let otherPlatformTopics: Set<String> = ["tvml", "tvmljs", "visionos"]
+
+    /// Frameworks (lowercased, as in the index) shipped in the macOS, tvOS, watchOS or visionOS SDK
+    /// but not in the iOS one. Computed from the installed SDKs once per Xcode build and cached.
+    static func otherPlatformFrameworks() -> Set<String> {
+        let cache = DocsPaths.directory.appendingPathComponent("platform-frameworks-\(Describer.cachedXcodeBuildForSymbols).json")
+        if let data = try? Data(contentsOf: cache), let names = try? JSONDecoder().decode([String].self, from: data) {
+            return Set(names)
+        }
+        func sdkPath(_ sdk: String) -> String? {
+            guard let result = try? Shell.run("/usr/bin/xcrun", ["--sdk", sdk, "--show-sdk-path"]), result.status == 0 else { return nil }
+            return result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        func entries(_ dir: String, suffix: String) -> Set<String> {
+            Set(((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+                .filter { $0.hasSuffix(suffix) }.map { $0.dropLast(suffix.count).lowercased() })
+        }
+        var iOS = Set<String>()
+        for sdk in ["iphoneos", "iphonesimulator"] {
+            guard let path = sdkPath(sdk) else { continue }
+            iOS.formUnion(entries(path + "/System/Library/Frameworks", suffix: ".framework"))
+            iOS.formUnion(entries(path + "/usr/lib/swift", suffix: ".swiftmodule")) // System, Spatial, simd…
+        }
+        if let developer = try? SymbolStore.developerSearchPaths() { iOS.formUnion(entries(developer.frameworks, suffix: ".framework")) }
+        guard !iOS.isEmpty else { return otherPlatformTopics } // no iOS SDK: don't guess
+        var others = Set<String>()
+        for sdk in ["macosx", "appletvos", "watchos", "xros"] {
+            if let path = sdkPath(sdk) { others.formUnion(entries(path + "/System/Library/Frameworks", suffix: ".framework")) }
+        }
+        let result = others.subtracting(iOS).union(otherPlatformTopics)
+        if let data = try? JSONEncoder().encode(result.sorted()) {
+            try? FileManager.default.createDirectory(at: DocsPaths.directory, withIntermediateDirectories: true)
+            try? data.write(to: cache)
+        }
+        return result
+    }
+
     public static var exists: Bool { FileManager.default.fileExists(atPath: DocsPaths.indexDatabase.path) }
 
     // MARK: Building
@@ -304,15 +354,20 @@ public enum DocsIndex {
         }
         if let h = hint, tokens.isEmpty { tokens = [h]; hint = nil }
 
+        // "NSTableView", "UIViewController": a symbol name, not a description.
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let queryIsIdentifier = !trimmed.contains(" ") && trimmed.contains(where: \.isUppercase)
         if let hint, framework == nil {
-            let boosted = try rankedSearch(db, tokens: tokens, framework: hint, kind: kind, limit: limit, excludeSources: excludeSources)
+            let boosted = try rankedSearch(db, tokens: tokens, framework: hint, kind: kind, limit: limit, excludeSources: excludeSources,
+                                           queryIsIdentifier: queryIsIdentifier)
             if !boosted.isEmpty { return boosted }
         }
-        return try rankedSearch(db, tokens: tokens, framework: framework?.lowercased(), kind: kind, limit: limit, excludeSources: excludeSources)
+        return try rankedSearch(db, tokens: tokens, framework: framework?.lowercased(), kind: kind, limit: limit, excludeSources: excludeSources,
+                                queryIsIdentifier: queryIsIdentifier)
     }
 
     private static func rankedSearch(_ db: SQLiteDatabase, tokens: [String], framework: String?, kind: String?, limit: Int,
-                                     excludeSources: Bool = false) throws -> [DocsSearchResult] {
+                                     excludeSources: Bool = false, queryIsIdentifier: Bool = false) throws -> [DocsSearchResult] {
         struct Row {
             let result: DocsSearchResult
             let score: Double
@@ -336,12 +391,19 @@ public enum DocsIndex {
             }
         }
 
-        var rows = try run(tokens.map { "\"\($0)\"*" }.joined(separator: " AND "))
+        // Each word also matches the word Apple's API names use for it ("push" → "remote").
+        func term(_ token: String) -> String {
+            let words = [token] + (synonyms[token] ?? [])
+            return words.count == 1 ? "\"\(token)\"*" : "(" + words.map { "\"\($0)\"*" }.joined(separator: " OR ") + ")"
+        }
+        var rows = try run(tokens.map(term).joined(separator: " AND "))
         if rows.count < limit { // relax to OR when the strict query is too narrow
             let seen = Set(rows.map(\.result.path))
-            rows += try run(tokens.map { "\"\($0)\"*" }.joined(separator: " OR ")).filter { !seen.contains($0.result.path) }
+            rows += try run(tokens.map(term).joined(separator: " OR ")).filter { !seen.contains($0.result.path) }
         }
         let joinedTokens = tokens.joined()
+        // Searching within one framework already chose the platform.
+        let otherPlatforms = framework == nil ? otherPlatformFrameworks() : []
         func rank(_ row: Row) -> Double {
             let r = row.result
             var s = -row.score + (kindBoost[r.kind] ?? 0)
@@ -350,6 +412,14 @@ public enum DocsIndex {
             s += sourceBoost[r.framework] ?? 0
             if tokens.contains(r.framework) || joinedTokens.contains(r.framework.replacingOccurrences(of: "-", with: "")) { s += 1 }
             s -= 0.15 * Double(r.path.filter { $0 == "/" }.count) // prefer shallower pages
+            if otherPlatforms.contains(r.framework) { s -= otherPlatformPenalty }
+            // The query is the page's exact name ("NSTableView", "color picker" → ColorPicker): that page,
+            // whatever its platform, is what was asked for.
+            // Only symbol-like titles ("ColorPicker", not the "Text Field" collection or a `window` property),
+            // and other platforms' pages only when the query itself is an identifier.
+            if r.title.lowercased().filter({ $0.isLetter || $0.isNumber }) == joinedTokens,
+               !r.title.contains(" "), r.title.contains(where: \.isUppercase),
+               !otherPlatforms.contains(r.framework) || queryIsIdentifier { s += 5 }
             return s
         }
         return rows.sorted { rank($0) > rank($1) }.prefix(limit).map(\.result)

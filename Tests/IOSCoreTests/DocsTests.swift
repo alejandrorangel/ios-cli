@@ -132,8 +132,26 @@ private func words(_ s: String) -> [String] {
     ]}}
     """#
     let db = dir.appendingPathComponent("docs.db").path
-    let pages = try DocsIndex.build(database: db) { insert in try insert("swiftui", Data(index.utf8)) }
-    #expect(pages == 4) // group markers aren't pages
+    let other = #"""
+    {"interfaceLanguages": {"swift": [
+      {"path": "/documentation/appkit", "title": "AppKit", "type": "module", "children": [
+        {"path": "/documentation/appkit/nscolorpicker", "title": "NSColorPicker", "type": "class"},
+        {"path": "/documentation/appkit/color-picker", "title": "Color Picker", "type": "collection"}
+      ]},
+      {"path": "/documentation/uikit", "title": "UIKit", "type": "module", "children": [
+        {"path": "/documentation/uikit/uicolorpickerviewcontroller", "title": "UIColorPickerViewController", "type": "class"},
+        {"path": "/documentation/uikit/uiapplication/registerforremotenotifications()",
+         "title": "func registerForRemoteNotifications()", "type": "method"}
+      ]}
+    ]}}
+    """#
+    let pages = try DocsIndex.build(database: db) { insert in
+        try insert("swiftui", Data(index.utf8))
+        try insert("appkit", Data(other.utf8))
+    }
+    #expect(pages == 10) // group markers aren't pages
+    // Pin the other-platform list instead of reading the installed SDKs.
+    try JSONEncoder().encode(["appkit"]).write(to: dir.appendingPathComponent("platform-frameworks-\(Describer.cachedXcodeBuildForSymbols).json"))
 
     setenv("IOS_CLI_DOCS_DIR", dir.path, 1)
     defer { unsetenv("IOS_CLI_DOCS_DIR") }
@@ -141,4 +159,12 @@ private func words(_ s: String) -> [String] {
     #expect(results.first?.path == "/documentation/swiftui/view/navigationdestination(for:destination:)")
     let stack = try DocsIndex.search("navigation", kind: "struct")
     #expect(stack.first?.title == "NavigationStack") // deprecated NavigationView ranks lower
+
+    // iOS first: the UIKit picker beats AppKit's, even AppKit's exactly named "Color Picker" collection…
+    #expect(try DocsIndex.search("color picker").first?.title == "UIColorPickerViewController")
+    // …unless AppKit is asked for, by framework or by exact symbol name.
+    #expect(try DocsIndex.search("color picker", framework: "appkit").first?.framework == "appkit")
+    #expect(try DocsIndex.search("NSColorPicker").first?.title == "NSColorPicker")
+    // "push" also matches Apple's "remote".
+    #expect(try DocsIndex.search("push notifications register").first?.title == "func registerForRemoteNotifications()")
 }

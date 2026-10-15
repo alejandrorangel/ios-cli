@@ -126,9 +126,9 @@ Simulator commands act on `--device` (name or UDID), else the only booted simula
 
 | Command | What it does |
 |---|---|
-| `ios docs search <words> [--source S] [--framework F] [--kind K]` | Searches about 384k pages: API docs (frameworks, REST/JS web services, sample code, release notes), the Human Interface Guidelines, Apple's tutorials, the Swift book, the App Store Review Guidelines and WWDC sessions (2023–2026). `--source api\|hig\|tutorials\|swift-book\|app-review\|wwdc` limits to one. The first search builds the index (under a minute) |
+| `ios docs search <words> [--source S] [--framework F] [--kind K]` | Searches about 384k pages: API docs (frameworks, REST/JS web services, sample code, release notes), the Human Interface Guidelines, Apple's tutorials, the Swift book, the App Store Review Guidelines and WWDC sessions (2023–2026). `--source api\|hig\|tutorials\|swift-book\|app-review\|wwdc` limits to one. iOS comes first: frameworks only on other platforms (AppKit, WatchKit, TVML…) rank lower unless named (`--framework appkit`, "appkit table view", `NSTableView`). The first search builds the index (under a minute) |
 | `ios docs fetch <link or URL>` | A page as markdown: `doc://…` (API docs, Swift book), `hig://…`, `tutorial://…` (steps with code), `asrg://4.2` (a Review Guideline and its sub-items; `asrg://` for the contents), `wwdc://2026/258` (description and timestamped transcript), or the developer.apple.com / docs.swift.org URL |
-| `ios docs api <Module.Symbol>` | Declaration, availability and doc comment from the installed SDK (offline; a module is extracted on first use, ~3–12 s) |
+| `ios docs api <Module.Symbol>` | Declaration, availability and doc comment from the installed SDK (offline; a module is extracted on first use, ~3–12 s). Includes the test frameworks that ship outside the SDK: `XCTest`, `XCUIAutomation`, `Testing` |
 | `ios docs update` | Rebuild the search index |
 
 ### Agent skills
