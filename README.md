@@ -109,10 +109,11 @@ Simulator commands act on `--device` (name or UDID), else the only booted simula
 | `ios input doubletap …`, `swipe <x1 y1 x2 y2>`, `swipe --direction up`, `type <text>`, `button home` | Other input |
 | `ios runner status`, `ios runner stop` | The UI automation runner behind `layout` and `input` |
 
-### Xcode: previews and new projects
+### Xcode: checks, previews and new projects
 
 | Command | What it does |
 |---|---|
+| `ios check <File.swift>…` | Compiler errors and warnings for the given files without a full build, through Xcode (~0.3 s warm; the first call starts Xcode's service, ~2 s). Exits non-zero on errors |
 | `ios preview <File.swift> [--name N \| --index N] [--variant "Color Scheme=Dark Appearance"] [--locale fr] [-o out.png]` | Renders a SwiftUI `#Preview` to PNG through Xcode (first render builds, ~20 s; then ~0.5 s); lists available variants and locales. Pick the preview by name (`#Preview("Dark mode")` or a `PreviewProvider`) or position; `--list` shows a file's previews without rendering |
 | `ios create <Name> [--template app] [--storage swiftdata] [--testing swift-testing] [--org com.example]` | New project from Xcode's own templates (`app`, `ios-app`, `document-app`, `game`, `framework` or any identifier); `--list-templates` shows them with their options |
 

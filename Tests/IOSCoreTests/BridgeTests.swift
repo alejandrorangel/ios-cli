@@ -41,3 +41,20 @@ import Testing
     let plain = XcodeBridge.toolError("RenderPreview", text: "Unsupported variant ‘Purple’")
     #expect(plain == .bridgeFailed(tool: "RenderPreview", message: "Unsupported variant ‘Purple’"))
 }
+
+@Test func parsesCodeIssues() {
+    let content = """
+    Current issues in 'App/ContentView.swift' (3 total):
+
+    1. [Error] [Line: 65] Cannot convert value of type 'Int' to specified type 'String'
+    2. [Warning] [Line: 64] Initialization of immutable value 'unused' was never used
+    3. [Note] Did you mean 'text'?
+       second line of the note
+    """
+    let diagnostics = CodeIssues.parse(content, file: "/src/ContentView.swift")
+    #expect(diagnostics.map(\.severity) == ["error", "warning", "note"])
+    #expect(diagnostics.map(\.line) == [65, 64, nil])
+    #expect(diagnostics[0].summary == "/src/ContentView.swift:65: error: Cannot convert value of type 'Int' to specified type 'String'")
+    #expect(diagnostics[2].message == "Did you mean 'text'?\nsecond line of the note")
+    #expect(CodeIssues.parse("No issues found in 'App/App.swift'.", file: "/src/App.swift").isEmpty)
+}

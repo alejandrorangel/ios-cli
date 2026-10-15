@@ -38,6 +38,7 @@ Simulator commands use `--device`, else the only booted simulator. Use them to s
 ## Build and run
 
 - `ios describe [--scheme S]` — schemes; with a scheme, the apps it builds (bundle ID, product path). Cached until project files change.
+- `ios check <File.swift> [more files]` — errors and warnings for just those files, ~0.3 s, no build (`--json`: `diagnostics` with line, no column). Run it right after editing; then `ios build` before running. Needs Xcode's one-time approval of `ios`.
 - `ios build --scheme S [--device D]` — builds and prints errors with file:line:column (`--json`: structured `errors`); exits non-zero on failure; full log path in the output.
 - `ios run --scheme S --device D` — build, boot the simulator if needed, install, launch; prints the PID. `--no-build` reinstalls the last build.
 - `ios test --scheme S [--device D]` — runs the scheme's tests; prints passed/failed/skipped counts and each failure as `file:line: message` (`--json`: `failures[].failures[]`). Without --device it uses the booted simulator, else an iPhone simulator (never a physical device). Rerun one test with `--only <id>` using the id it printed (Target/Suite/test; XCTest ids drop the `()`, Swift Testing ids keep them); add `--no-build` when only test data changed. Build errors come back as `buildErrors`. Exits non-zero on failure.

@@ -10,7 +10,8 @@ public struct Diagnostic: Codable, Equatable, Sendable {
     public var summary: String {
         guard let file else { return "\(severity): \(message)" }
         guard let line else { return "\(file): \(severity): \(message)" }
-        return "\(file):\(line):\(column ?? 0): \(severity): \(message)"
+        guard let column else { return "\(file):\(line): \(severity): \(message)" }
+        return "\(file):\(line):\(column): \(severity): \(message)"
     }
 }
 
