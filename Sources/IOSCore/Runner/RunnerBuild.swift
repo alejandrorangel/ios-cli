@@ -65,25 +65,9 @@ public enum RunnerBuild {
         return files.first { $0.pathExtension == "xctestrun" }
     }
 
-    /// The runner project shipped as a package resource. Looked up next to the real executable
-    /// (following the ~/.local/bin symlink) rather than through Bundle.module, whose fallback is
-    /// the original build folder and which crashes when the bundle is missing.
+    /// The runner project shipped as a package resource.
     static func sourceDirectory() throws -> URL {
-        let fm = FileManager.default
-        var candidates: [URL] = []
-        if let override = ProcessInfo.processInfo.environment["IOS_CLI_RESOURCES"] {
-            candidates.append(URL(fileURLWithPath: override).appendingPathComponent("Runner"))
-        }
-        if let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() {
-            let bundle = executable.deletingLastPathComponent().appendingPathComponent("ios-cli_IOSCore.bundle")
-            candidates.append(bundle.appendingPathComponent("Contents/Resources/Runner")) // macOS bundle layout
-            candidates.append(bundle.appendingPathComponent("Runner"))
-        }
-        if let found = candidates.first(where: { fm.fileExists(atPath: $0.appendingPathComponent("Runner.xcodeproj").path) }) {
-            return found
-        }
-        throw IOSError.invalidOutput(tool: "ios", reason: "runner resources missing from the installation (looked in "
-            + candidates.map(\.path).joined(separator: ", ") + "); reinstall with scripts/install.sh")
+        try BundledResources.directory("Runner", containing: "Runner.xcodeproj")
     }
 
     static func sourceHash(_ dir: URL) throws -> String {

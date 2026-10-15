@@ -31,9 +31,18 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
     case swiftUIDumpFailed(reason: String)
     case bridgeNotApproved(detail: String)
     case bridgeFailed(tool: String, message: String)
+    case skillNotFound(name: String, available: [String])
+    case skillExists(path: String)
+    case skillNotInstalled(name: String, directory: String)
 
     public var description: String {
         switch self {
+        case let .skillNotFound(name, available):
+            return "No skill named '\(name)'." + Self.list(available, heading: "Available")
+        case let .skillExists(path):
+            return "\(path) exists and wasn't installed by `ios skills`; pass --force to replace or remove it."
+        case let .skillNotInstalled(name, directory):
+            return "\(name) isn't installed in \(directory)."
         case let .bridgeNotApproved(detail):
             return """
                 Xcode hasn't approved `ios` to use its tools yet. Opening or creating a project (`ios preview …`, \

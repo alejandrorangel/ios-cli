@@ -52,6 +52,15 @@ private func parse() throws -> [SwiftUIViewNode] {
     #expect(stack.children[0].module == "DesignSystem")
 }
 
+@Test func extractsAppTypesFromGenericParameters() {
+    let system: (String) -> Bool = { ["SwiftUI", "Swift"].contains($0) }
+    let type = "SwiftUI.ModifiedContent<SwiftUI.Button<SampleApp.ItemCard>, SwiftUI._PaddingLayout>"
+    #expect(SwiftUITree.appTypes(in: type, excluding: "Button", isSystemModule: system) == ["ItemCard"])
+    let forEach = "SwiftUI.ForEach<Swift.Array<SampleApp.Item>, Swift.String, SampleApp.ItemRow>"
+    #expect(SwiftUITree.appTypes(in: forEach, excluding: "ForEach", isSystemModule: system) == ["Item", "ItemRow"])
+    #expect(SwiftUITree.appTypes(in: "SampleApp.WelcomeView", excluding: "WelcomeView", isSystemModule: system).isEmpty)
+}
+
 @Test func detectsEmptyDumps() throws {
     #expect(SwiftUITree.isEmpty([Data("[]".utf8), Data("[]".utf8)]))
     #expect(SwiftUITree.isEmpty([]))

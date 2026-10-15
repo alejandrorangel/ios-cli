@@ -123,6 +123,7 @@ struct LayoutCommand: ParsableCommand {
         var line = String(repeating: "  ", count: depth) + node.name
         if node.module != "SwiftUI" { line += "  [\(node.module)]" }
         if let text = node.text { line += " \"\(text)\"" }
+        if !node.contains.isEmpty { line += "  ‹" + node.contains.prefix(4).joined(separator: ", ") + "›" }
         return ([line] + node.children.map { swiftUIText($0, depth: depth + 1) }).joined(separator: "\n")
     }
 

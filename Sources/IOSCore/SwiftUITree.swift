@@ -8,6 +8,9 @@ public struct SwiftUIViewNode: Codable, Sendable {
     public let module: String
     /// The string a Text displays, when known.
     public let text: String?
+    /// App types named in this node's generic parameters, e.g. ["ItemCard"] for
+    /// `Button<MyApp.ItemCard>`. SwiftUI's debug data records most custom views only this way.
+    public let contains: [String]
     public let children: [SwiftUIViewNode]
 }
 
@@ -119,7 +122,18 @@ public enum SwiftUITree {
         let isStructural = module == "SwiftUI" && structuralViews.contains(base)
         guard isAppType || isStructural else { return children }
         let name = base.split(separator: ".").last.map(String.init) ?? base
-        return [SwiftUIViewNode(name: name, module: module, text: base == "Text" ? value.flatMap(firstString) : nil, children: children)]
+        return [SwiftUIViewNode(name: name, module: module, text: base == "Text" ? value.flatMap(firstString) : nil,
+                                contains: appTypes(in: fullType, excluding: name, isSystemModule: isSystemModule), children: children)]
+    }
+
+    /// Module-qualified app types inside a type string, in order, without duplicates.
+    static func appTypes(in type: String, excluding own: String, isSystemModule: (String) -> Bool) -> [String] {
+        var seen = Set<String>()
+        return type.matches(of: /([A-Za-z_][A-Za-z0-9_]*)\.([A-Z][A-Za-z0-9_]*)/).compactMap { match in
+            let module = String(match.output.1), name = String(match.output.2)
+            guard !isSystemModule(module), name != own, seen.insert(name).inserted else { return nil }
+            return name
+        }
     }
 
     /// The first String value in a node's value tree (a Text's verbatim or localized key).
@@ -187,20 +201,37 @@ public enum SwiftUITree {
     else:
         run("process attach -p %d" % pid)
 
+    # Wait for a "stopped" state-change event. Polling GetState() isn't reliable on devices:
+    # it can read "stopped" while the attach is still only "connected".
     deadline = time.time() + 90
     listener = dbg.GetListener()
     while True:
-        target = dbg.GetSelectedTarget()
-        process = target.GetProcess() if target else None
-        if process and process.GetState() == lldb.eStateStopped:
-            break
         if time.time() > deadline:
             finish(False, error="timed out attaching to pid %d" % pid)
-        listener.WaitForEvent(1, lldb.SBEvent())
+        event = lldb.SBEvent()
+        if listener.WaitForEvent(1, event) and lldb.SBProcess.EventIsProcessEvent(event):
+            state = lldb.SBProcess.GetStateFromEvent(event)
+            if state == lldb.eStateStopped:
+                break
+            if state in (lldb.eStateExited, lldb.eStateDetached, lldb.eStateCrashed):
+                finish(False, error="process %d ended while attaching" % pid)
+
+    # A device reports "stopped" before LLDB has finished loading the app's images; importing
+    # UIKit at that point fails. Let pending events drain, then retry the imports.
+    quiet_until = time.time() + 1.0
+    settle_deadline = time.time() + 10
+    while time.time() < min(quiet_until, settle_deadline) or time.time() < quiet_until:
+        if listener.WaitForEvent(1, lldb.SBEvent()):
+            quiet_until = time.time() + 1.0
+        if time.time() > settle_deadline:
+            break
 
     dbg.SetAsync(False)
-    run("expr -l objc -- @import Foundation")
-    run("expr -l objc -- @import UIKit")
+    for attempt in range(6):
+        imported = run("expr -l objc -- @import Foundation").Succeeded() and run("expr -l objc -- @import UIKit").Succeeded()
+        if imported:
+            break
+        time.sleep(1)
     expr = ('expr -l objc -O -- NSMutableString *out = [NSMutableString string]; NSMutableArray *stack = [NSMutableArray array]; '
             'for (UIWindow *w in (NSArray *)[[UIApplication sharedApplication] valueForKeyPath:@"connectedScenes.@distinctUnionOfArrays.windows"]) [stack addObject:w]; '
             'int vdIdx = 0; NSString *stamp = [[NSUUID UUID] UUIDString]; '
@@ -213,7 +244,8 @@ public enum SwiftUITree {
     output, error = result.GetOutput() or "", result.GetError() or ""
     run("detach")
     if not result.Succeeded():
-        finish(False, error=error.strip()[-500:])
+        # The first errors explain the failure; later ones are consequences.
+        finish(False, error=("imports failed; " if not imported else "") + error.strip()[:600])
     finish(True, output=output)
     """#
 }

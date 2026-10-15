@@ -8,7 +8,7 @@ description: Builds, runs and inspects iOS apps from the terminal with the `ios`
 
 ## Installation
 
-If `ios` isn't on the PATH, install it from the ios-cli repository: `scripts/install.sh` (installs to `~/.local/bin/ios`). Requires Xcode 27.
+If `ios` isn't on the PATH, install it from the ios-cli repository: `scripts/install.sh` (installs to `~/.local/bin/ios`). Requires Xcode 27. Keep this skill current with `ios skills update`.
 
 ## Rules of thumb
 
@@ -82,6 +82,7 @@ Physical devices need **Settings → Developer → Enable UI Automation**, and t
 
 `preview` and `create` go through Xcode's tool service: the first time, Xcode shows a dialog to approve `ios` — ask the user to approve it if a command reports "hasn't approved".
 
-## Not available yet
+## Skills
 
-`ios skills` exists but reports "not implemented".
+- `ios skills list` — the bundled `ios-cli` skill and the skills that ship with Xcode 27 (`swiftui-specialist`, `swiftui-whats-new-27`, `uikit-app-modernization`, `app-intents-specialist`, `modernize-tests`, …), with install state.
+- `ios skills add <names…>` / `--all`, `ios skills remove <names…>`, `ios skills update` — into `~/.claude/skills` (`--project` for `./.claude/skills`, `--dir` for another agent's folder). Only skills installed by `ios skills` are updated or removed.

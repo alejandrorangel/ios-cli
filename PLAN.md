@@ -346,7 +346,7 @@ Finding: a device's unified log can't be read without root (`log: Must be root t
 | `input type` | 0.56 s (value confirmed in tree) | 0.67 s (search results appeared) |
 | swipe / Home | 0.81 s / 0.48 s | — |
 
-**`layout --swiftui` done on the simulator (2026-10-15)**; physical-device run pending (the iPad was disconnected — the same LLDB path was verified on it manually in R4).
+**`layout --swiftui` done (2026-10-15)** on the simulator and the physical iPad (20 s on the iPad, 184 lines / 33 `Text` nodes for the test app's home screen). Two device fixes: wait for a real "stopped" state-change *event* (polling `GetState()` reads "stopped" while the attach is still only "connected"), and let LLDB settle and retry `@import UIKit` before evaluating. SwiftUI's debug data records most custom views only inside generic parameters (`Button<App.ItemCard>`), so each node is annotated with the app types it names: `LazyHStack ‹ItemCard, AvatarCard›`.
 - `--relaunch` starts the app with `SWIFTUI_VIEW_DEBUG=1`; LLDB (Python API, async attach with timeout, embedded script) calls `makeViewDebugData` on every `_UIHostingView`, files are read from the simulator container or copied off the device.
 - Output keeps the app's own types (any non-SDK module, so the app's own frameworks count) and SwiftUI structure (stacks, lists, navigation, `Text` with its string…); modifiers and internals are collapsed. Example (test app welcome screen, names changed): `WelcomeView → GeometryReader → ZStack → [Image, VStack → [Spacer, Image, VStack → Text "…" …]]`. `--raw` prints SwiftUI's unfiltered data.
 - Findings: SwiftUI lists children last-to-first (reversed to screen order); the debug data appears a few seconds after first render, so `--relaunch` retries (two reads, ~20 s); reading a running app takes ~4.4 s on a simulator. The relaunch → `ios input` → `layout --swiftui` workflow works (the runner activates the app without relaunching it). UIKit screens presented over SwiftUI don't appear (the SwiftUI views underneath do).
@@ -366,6 +366,8 @@ Tap points match the Xcode bridge's hit points exactly on the same screen ("Get 
 `iosd` daemon · `ios layout [--flat|--full]` · `ios input tap|swipe|type|button|rotate` · `ios screen resolve` · `ios preview render` · `ios create` · `ios test` · `ios check <file>` (diagnostics) — bridge first, XCUITest fallback.
 
 ### Phase 4 — Ecosystem
+
+**`ios skills` done (2026-10-15):** `list`, `add <names>|--all`, `remove`, `update`, into `~/.claude/skills` (`--project`, `--dir` for other agents). Sources: the bundled `ios-cli` skill (now a package resource, so `ios skills add ios-cli` works without the repo; `install.sh --skill` uses it) and Xcode 27's 10 skills via `xcrun mcpbridge run-agent skills export` (cached per Xcode build; 0.1 s). A marker file in each installed skill keeps `update`/`remove` away from hand-made skills unless `--force`. 50 unit tests.
 `ios skills` (Xcode skills + team-specific), Claude Code skill for the `ios` CLI, shell completions, `ios update`, weekly docs-index CI job.
 
 ---

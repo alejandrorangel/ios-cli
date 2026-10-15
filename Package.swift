@@ -20,8 +20,9 @@ let package = Package(
             ]
         ),
         // Resources/Runner is the XCUITest runner project, built on the user's Mac on first use
-        // (it must be signed for their devices), so it ships as source.
-        .target(name: "IOSCore", resources: [.copy("Resources/Runner")]),
+        // (it must be signed for their devices), so it ships as source. Resources/Skills holds
+        // the agent skills `ios skills add` installs.
+        .target(name: "IOSCore", resources: [.copy("Resources/Runner"), .copy("Resources/Skills")]),
         .testTarget(name: "IOSCoreTests", dependencies: ["IOSCore"]),
     ]
 )

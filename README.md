@@ -30,7 +30,9 @@ Skeleton (Phase 2 start). Working commands:
 | `ios preview <File.swift> [--index N] [--variant "Color Scheme=Dark Appearance"] [--locale fr] [-o out.png]` | Renders a SwiftUI `#Preview` to PNG through Xcode (first render builds, ~20 s; then ~0.5 s); lists available variants and locales |
 | `ios create <Name> [--template app\|ios-app\|document-app\|game\|framework\|<id>] [--storage swiftdata] [--testing swift-testing] [--org com.example]` | New project from Xcode's own templates; `--list-templates` shows them with options |
 
-Every command accepts `--json`. The planned `skills` command exists and reports its phase in PLAN.md.
+| `ios skills list \| add <names> \| remove <names> \| update [--project \| --dir D]` | Agent skills: the bundled `ios-cli` skill and Xcode 27's own (`swiftui-specialist`, `uikit-app-modernization`, …) into `~/.claude/skills` |
+
+Every command accepts `--json`.
 
 `preview`, `create` and `--list-templates` use Xcode 27's tool service (`xcrun mcpbridge`; no Xcode window needed). Xcode asks you once to approve `ios` when a command first opens or creates a project (in testing, the approval carried over to rebuilt and installed binaries).
 
@@ -64,4 +66,5 @@ swift test
 | `Sources/ios/` | Command definitions (swift-argument-parser) |
 | `Sources/IOSCore/` | Logic: tool runner, `simctl`/`devicectl` parsing, target resolution, output |
 | `Tests/IOSCoreTests/` | Parsing and resolution tests using sanitized samples (no device needed) |
-| `spikes/` | Feasibility prototypes and evidence (see `spikes/README.md`) |
+| `Sources/IOSCore/Resources/` | The XCUITest runner project and the `ios-cli` agent skill, shipped with the binary |
+| `spikes/` | Small reference prototypes (see `spikes/README.md`) |
