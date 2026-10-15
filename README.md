@@ -106,7 +106,10 @@ Simulator commands act on `--device` (name or UDID), else the only booted simula
 | `ios layout --voiceover [--max N]` | What VoiceOver reads on the screen, in its navigation order (iOS 27+, via `XCUIVoiceOverService`). Unlike the element list, views hidden from accessibility don't appear, so use it to check accessibility. Items read from a system alert (Low Battery, permission prompts) are flagged. VoiceOver is switched back off afterwards |
 | `ios layout --swiftui [--relaunch]` | The app's SwiftUI view tree (its own views, stacks, lists, `Text` with its string). `--relaunch` restarts the app with SwiftUI's debug data on; navigate with `ios input`, then read again. Debug builds only |
 | `ios input tap --id I` / `--label L` / `<x> <y>` | Tap an element or a point |
-| `ios input doubletap …`, `swipe <x1 y1 x2 y2>`, `swipe --direction up`, `type <text>`, `button home` | Other input |
+| `ios input type <text> [--submit]`, `ios input key return\|delete\|tab\|space [--count N]` | Type into the focused field; `--submit` presses Return after |
+| `ios input wait --id I [--gone] [--timeout 10]` | Wait until an element is visible (or gone, e.g. a spinner) instead of retrying |
+| `ios input scroll-to --id I` / `--label L` | Scroll until the element is on screen (toward it if it exists off screen; lazy lists: down, then back up) |
+| `ios input doubletap …`, `swipe <x1 y1 x2 y2>`, `swipe --direction up`, `button home` | Other input |
 | `ios runner status`, `ios runner stop` | The UI automation runner behind `layout` and `input` |
 
 ### Xcode: checks, previews and new projects

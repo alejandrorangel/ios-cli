@@ -40,9 +40,14 @@ public enum SimControl {
         if show { try Shell.checked("/usr/bin/open", ["-a", "Simulator", "--args", "-CurrentDeviceUDID", simulator.udid]) }
     }
 
+    /// The state can change after it was listed (stopping a runner can shut the simulator down),
+    /// so "already shut down" counts as success.
     public static func shutdown(_ simulator: Simulator) throws {
         guard simulator.isBooted else { return }
-        try simctl(["shutdown", simulator.udid])
+        let result = try Shell.run("/usr/bin/xcrun", ["simctl", "shutdown", simulator.udid])
+        guard result.status == 0 || result.stderr.contains("current state: Shutdown") else {
+            throw IOSError.toolFailed(command: "simctl shutdown \(simulator.udid)", status: result.status, stderr: result.stderr)
+        }
     }
 
     /// Erases contents and settings. simctl only erases shut-down simulators, so a booted one is

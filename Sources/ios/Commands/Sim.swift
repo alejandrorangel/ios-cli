@@ -126,6 +126,7 @@ struct Sim: ParsableCommand {
 
         func run() throws {
             let simulator = try SimControl.simulator(target.device, command: "sim erase")
+            RunnerSessions.stop(.simulator(simulator)) // erasing removes the runner app anyway
             let rebooted = try SimControl.erase(simulator)
             try Sim.emit(simulator, rebooted ? "Erased and rebooted" : "Erased", json: global.json)
         }
@@ -141,6 +142,7 @@ struct Sim: ParsableCommand {
 
         func run() throws {
             let simulator = try SimControl.simulator(device, command: "sim delete")
+            RunnerSessions.stop(.simulator(simulator))
             try SimControl.delete(simulator)
             try Sim.emit(simulator, "Deleted", json: global.json)
         }

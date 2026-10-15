@@ -56,7 +56,9 @@ Simulator commands use `--device`, else the only booted simulator. Use them to s
 - `ios screen capture --device D -o shot.png` — screenshot.
 - `ios layout --bundle-id B --device D` — visible elements: `[n] Type id=… "label" value=… @(x,y)`. The last app is remembered per device. A system alert (e.g. a permission prompt) is listed last with its buttons, and the app's elements are marked `covered`; tap `--label Allow` to answer it.
 - `ios input tap --id <identifier>` (best) / `--label <text>` / `<x> <y>` — taps the element's visible centre.
-- `ios input type <text>` — types into the focused field; tap the field first (an unfocused `type` fails with a clear error).
+- `ios input type <text> [--submit]` — types into the focused field; tap the field first (an unfocused `type` fails with a clear error). `--submit` presses Return afterwards. `ios input key delete --count 20` clears text; `key return|tab|space` too.
+- `ios input wait --id X [--timeout 10]` — after a tap that loads something, wait for the next screen's element instead of sleeping or retrying; `--gone` waits for a spinner to disappear. Exits non-zero on timeout.
+- `ios input scroll-to --id X` (or `--label`, exact) — scrolls until the element is on screen, then `ios input tap --id X`. In lazy lists rows don't exist until shown, so it scrolls down and then back up; pass `--direction down` when you know it's above.
 - `ios input swipe --direction up|down|left|right`, `ios input doubletap …`, `ios input button home`.
 - `ios runner status|stop --device D` — the XCUITest runner behind layout/input. It starts on first use (~15 s, built once per Xcode) and then answers in ~0.5–1 s. Stopping it closes the app it was driving.
 

@@ -37,10 +37,20 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
     case skillExists(path: String)
     case skillNotInstalled(name: String, directory: String)
     case simulatorOnly(command: String)
+    case waitTimedOut(query: String, seconds: Double, gone: Bool, covered: Bool)
+    case scrollTargetNotFound(query: String, swipes: Int, reachedEnd: Bool)
     case simulatorNotBooted(name: String, udid: String)
 
     public var description: String {
         switch self {
+        case let .waitTimedOut(query, seconds, gone, covered):
+            let time = String(format: "%g", seconds)
+            if gone { return "\(query) was still on screen after \(time) s." }
+            return "No visible element matched \(query) within \(time) s."
+                + (covered ? " One exists but is covered (by a sheet or a system alert); dismiss that first." : " Run `ios layout` to see what's on screen.")
+        case let .scrollTargetNotFound(query, swipes, reachedEnd):
+            return "Didn't find \(query) after \(swipes) swipe\(swipes == 1 ? "" : "s")"
+                + (reachedEnd ? " (the content stopped moving: it's not in this direction; try --direction)." : "; raise --max-swipes or try --direction.")
         case let .simulatorOnly(command):
             return "`ios \(command)` works on simulators only; pass a simulator with --device."
         case let .simulatorNotBooted(name, udid):

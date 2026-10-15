@@ -181,3 +181,26 @@ private func tree() throws -> UIElementNode {
     #expect(elements.map(\.covered) == [true, false, false, false])
     #expect(Layout.find(in: elements, label: "Allow")?.center == Point(x: 201, y: 565))
 }
+
+@Test func locatesOffscreenElementsAndTheWayToThem() throws {
+    let json = #"""
+    {"type": 2, "frame": [0, 0, 402, 874], "children": [
+      {"type": 4, "frame": [0, 0, 402, 874], "children": [
+        {"type": 75, "id": "row-1", "label": "Row 1", "frame": [0, 100, 402, 44]},
+        {"type": 75, "id": "row-40", "label": "Row 40", "frame": [0, 1860, 402, 44]}
+      ]}
+    ]}
+    """#
+    let tree = try Layout.parse(try JSONSerialization.jsonObject(with: Data(json.utf8)))
+    let screen = Layout.screen(of: tree)
+    #expect(Layout.flatten(tree).map(\.id) == ["row-1"])                         // off-screen rows aren't listed…
+    let row = try #require(Layout.locate(in: tree, label: "row 40"))             // …but can be located
+    #expect(row.id == "row-40")
+    #expect(Layout.scrollDirection(toward: row.frame, screen: screen) == "up")    // finger up reveals content below
+    #expect(Layout.scrollDirection(toward: Rect(x: 0, y: -200, width: 402, height: 44), screen: screen) == "down")
+    #expect(Layout.scrollDirection(toward: Rect(x: 0, y: 100, width: 402, height: 44), screen: screen) == nil)
+    let half = LayoutElement(index: 1, type: "Cell", id: nil, label: nil, value: nil, placeholder: nil,
+                             frame: Rect(x: 0, y: 852, width: 402, height: 44), center: Point(x: 201, y: 863),
+                             enabled: true, selected: false, focused: false, covered: false)
+    #expect(Layout.visibleFraction(half, screen: screen) == 0.5)
+}

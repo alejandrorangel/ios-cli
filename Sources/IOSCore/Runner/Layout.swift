@@ -138,8 +138,7 @@ public enum Layout {
     public static func flatten(_ root: UIElementNode) -> [LayoutElement] {
         // The application's frame is the screen. Not the first window: with iPad form sheets that
         // window can be smaller than the display, and a sheet drawn outside it was dropped.
-        let windows = root.children.filter { $0.type == "Window" && !$0.frame.isEmpty }.map(\.frame)
-        let screen = !root.frame.isEmpty ? root.frame : windows.reduce(windows.first ?? root.frame) { $0.union($1) }
+        let screen = screen(of: root)
         var out: [LayoutElement] = []
         func visit(_ n: UIElementNode, parent: UIElementNode?, insideKeyboard: Bool, covered: Bool) {
             let keyboard = insideKeyboard || n.type == "Keyboard"
@@ -193,7 +192,9 @@ public enum Layout {
 
     /// Finds the element to act on: exact identifier, else exact label, else label containing
     /// the text (case-insensitive). Interactive elements win over static ones.
-    public static func find(in elements: [LayoutElement], id: String? = nil, label: String? = nil) -> LayoutElement? {
+    /// `exactLabel` drops the "contains" fallback, for searches (wait, scroll-to) where a partial match
+    /// ("Row 28" for "Row 2") would stop too early; case still doesn't matter.
+    public static func find(in elements: [LayoutElement], id: String? = nil, label: String? = nil, exactLabel: Bool = false) -> LayoutElement? {
         func best(_ matches: [LayoutElement]) -> LayoutElement? {
             let ranked = matches.filter { !$0.covered } + matches.filter(\.covered) // what's on top first
             return ranked.first { interactiveTypes.contains($0.type) } ?? ranked.first
@@ -201,13 +202,51 @@ public enum Layout {
         if let id { return best(elements.filter { $0.id == id }) }
         guard let label else { return nil }
         if let exact = best(elements.filter { $0.label == label }) { return exact }
+        if exactLabel { return best(elements.filter { $0.label?.caseInsensitiveCompare(label) == .orderedSame }) }
         return best(elements.filter { $0.label?.localizedCaseInsensitiveContains(label) == true })
     }
 
-    /// Start and end points for a swipe across the middle of the screen.
-    public static func swipePoints(direction: String, screen: Rect) -> (Point, Point)? {
+    /// Finds a matching node anywhere in the tree, including off-screen ones that `flatten` drops
+    /// (rows below the fold in a non-lazy list): exact identifier, else exact label, else label containing it.
+    public static func locate(in root: UIElementNode, id: String? = nil, label: String? = nil, exactLabel: Bool = false) -> UIElementNode? {
+        var nodes: [UIElementNode] = []
+        func collect(_ n: UIElementNode) { nodes.append(n); n.children.forEach(collect) }
+        collect(root)
+        nodes = nodes.filter { !["Application", "Window", systemAlertLayer].contains($0.type) && !$0.frame.isEmpty }
+        if let id { return nodes.first { $0.id == id } }
+        guard let label else { return nil }
+        if let exact = nodes.first(where: { $0.label == label }) { return exact }
+        if exactLabel { return nodes.first { $0.label?.caseInsensitiveCompare(label) == .orderedSame } }
+        return nodes.first { $0.label?.localizedCaseInsensitiveContains(label) == true }
+    }
+
+    /// The finger direction that brings `frame` into `screen` (content moves the opposite way),
+    /// or nil when it's already on screen.
+    public static func scrollDirection(toward frame: Rect, screen: Rect) -> String? {
+        if frame.y >= screen.maxY - 1 { return "up" }
+        if frame.maxY <= screen.y + 1 { return "down" }
+        if frame.x >= screen.maxX - 1 { return "left" }
+        if frame.maxX <= screen.x + 1 { return "right" }
+        return nil
+    }
+
+    /// How much of the element is on screen, 0…1.
+    public static func visibleFraction(_ element: LayoutElement, screen: Rect) -> Double {
+        guard !element.frame.isEmpty, let visible = element.frame.intersection(screen) else { return 0 }
+        return (visible.width * visible.height) / (element.frame.width * element.frame.height)
+    }
+
+    /// The screen's root frame: the application's, else the union of its windows.
+    public static func screen(of root: UIElementNode) -> Rect {
+        let windows = root.children.filter { $0.type == "Window" && !$0.frame.isEmpty }.map(\.frame)
+        return !root.frame.isEmpty ? root.frame : windows.reduce(windows.first ?? root.frame) { $0.union($1) }
+    }
+
+    /// Start and end points for a swipe across the middle of the screen; `reach` is how far each end
+    /// is from the centre, as a fraction of the screen.
+    public static func swipePoints(direction: String, screen: Rect, reach: Double = 0.25) -> (Point, Point)? {
         let cx = screen.x + screen.width / 2, cy = screen.y + screen.height / 2
-        let dy = screen.height * 0.25, dx = screen.width * 0.3
+        let dy = screen.height * reach, dx = screen.width * min(reach + 0.05, 0.4)
         switch direction {
         case "up": return (Point(x: cx, y: cy + dy), Point(x: cx, y: cy - dy))
         case "down": return (Point(x: cx, y: cy - dy), Point(x: cx, y: cy + dy))

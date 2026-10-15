@@ -221,8 +221,26 @@ final class RunnerUITests: XCTestCase {
             return "ok"
 
         case "swipe":
-            let v = try numbers(argument, count: 4, usage: "swipe <x1> <y1> <x2> <y2> [hold]")
-            try coordinate(v[0], v[1]).press(forDuration: v.count > 4 ? v[4] : 0.05, thenDragTo: try coordinate(v[2], v[3]))
+            // An end hold keeps the finger down at the end, so the content stops there instead of
+            // coasting on (what scroll-to needs to move a known distance).
+            let v = try numbers(argument, count: 4, usage: "swipe <x1> <y1> <x2> <y2> [hold] [end-hold]")
+            let start = try coordinate(v[0], v[1]), end = try coordinate(v[2], v[3])
+            if v.count > 5 {
+                start.press(forDuration: v[4], thenDragTo: end, withVelocity: .default, thenHoldForDuration: v[5])
+            } else {
+                start.press(forDuration: v.count > 4 ? v[4] : 0.05, thenDragTo: end)
+            }
+            return "ok"
+
+        case "key":
+            // "key <name> [count]": keys typed into whatever has keyboard focus.
+            let words = argument.split(separator: " ").map(String.init)
+            let keys: [String: XCUIKeyboardKey] = ["return": .return, "delete": .delete, "tab": .tab, "space": .space]
+            guard let name = words.first, let key = keys[name] else {
+                throw RunnerError(message: "usage: key return|delete|tab|space [count]")
+            }
+            let count = max(1, min(words.count > 1 ? Int(words[1]) ?? 1 : 1, 500))
+            try currentApp().typeText(String(repeating: key.rawValue, count: count))
             return "ok"
 
         case "type":

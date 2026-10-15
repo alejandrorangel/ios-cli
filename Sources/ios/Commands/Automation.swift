@@ -181,7 +181,7 @@ struct LayoutCommand: ParsableCommand {
 struct Input: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Tap, swipe, type and press buttons on a simulator or device.",
-        subcommands: [Tap.self, DoubleTap.self, Swipe.self, TypeText.self, Button.self]
+        subcommands: [Tap.self, DoubleTap.self, Swipe.self, TypeText.self, Key.self, Button.self, Wait.self, ScrollTo.self]
     )
 
     struct Result: Encodable {
@@ -277,10 +277,144 @@ struct Input: ParsableCommand {
         @OptionGroup var global: GlobalOptions
         @OptionGroup var automation: AutomationOptions
         @Argument(help: "Text to type.") var text: [String]
+        @Flag(help: "Press Return afterwards (submit a search, go to the next field…).") var submit = false
 
         func run() throws {
-            let reply = try automation.session().send("type \(text.joined(separator: " "))")
-            try Input.report(Result(action: "Typed \"\(text.joined(separator: " "))\"", point: nil, element: nil, elapsed: reply.elapsed), json: global.json)
+            let session = try automation.session()
+            var elapsed = try session.send("type \(text.joined(separator: " "))").elapsed
+            if submit { elapsed += try session.send("key return").elapsed }
+            let action = "Typed \"\(text.joined(separator: " "))\"" + (submit ? " and pressed Return" : "")
+            try Input.report(Result(action: action, point: nil, element: nil, elapsed: elapsed), json: global.json)
+        }
+    }
+
+    struct Key: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Press a keyboard key in the focused field: return, delete, tab or space.",
+            discussion: "`ios input key delete --count 20` clears up to 20 characters before the cursor."
+        )
+        @OptionGroup var global: GlobalOptions
+        @OptionGroup var automation: AutomationOptions
+        @Argument(help: "return, delete, tab or space.") var name: String
+        @Option(help: "Press it this many times.") var count = 1
+
+        func validate() throws {
+            guard ["return", "delete", "tab", "space"].contains(name) else { throw ValidationError("Key must be return, delete, tab or space.") }
+            guard (1...500).contains(count) else { throw ValidationError("--count must be 1–500.") }
+        }
+
+        func run() throws {
+            let reply = try automation.session().send("key \(name) \(count)")
+            try Input.report(Result(action: "Pressed \(name)" + (count > 1 ? " ×\(count)" : ""), point: nil, element: nil, elapsed: reply.elapsed), json: global.json)
+        }
+    }
+
+    struct Wait: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Wait until an element appears (or disappears with --gone).",
+            discussion: """
+            Polls the screen until a visible, uncovered element matches --id / --label, then prints it; \
+            use it after a tap that loads a screen instead of retrying. Exits non-zero on timeout.
+            """
+        )
+        @OptionGroup var global: GlobalOptions
+        @OptionGroup var automation: AutomationOptions
+        @Option(help: "Accessibility identifier to wait for.") var id: String?
+        @Option(help: "Label to wait for (exact, ignoring case).") var label: String?
+        @Flag(help: "Wait until it's gone instead (e.g. a spinner).") var gone = false
+        @Option(help: "Seconds before giving up.") var timeout: Double = 10
+        @Option(help: "Seconds between checks.") var interval: Double = 0.5
+
+        func validate() throws {
+            if (id == nil) == (label == nil) { throw ValidationError("Pass --id or --label.") }
+            if timeout <= 0 || interval <= 0 { throw ValidationError("--timeout and --interval must be positive.") }
+        }
+
+        func run() throws {
+            let session = try automation.session()
+            let query = id.map { "id '\($0)'" } ?? "label '\(label ?? "")'"
+            let start = Date()
+            var coveredMatch = false
+            while true {
+                // The app can be briefly out of the foreground (a system sheet, a transition); keep polling.
+                if let elements = try? Layout.flatten(snapshot(session)) {
+                    let match = Layout.find(in: elements, id: id, label: label, exactLabel: true)
+                    coveredMatch = match?.covered == true
+                    let visible = match.flatMap { $0.covered ? nil : $0 }
+                    let elapsed = Date().timeIntervalSince(start)
+                    if gone, visible == nil {
+                        try Input.report(Result(action: "\(query) is gone", point: nil, element: nil, elapsed: elapsed), json: global.json)
+                        return
+                    }
+                    if !gone, let visible {
+                        try Input.report(Result(action: "Found", point: visible.center, element: visible, elapsed: elapsed), json: global.json)
+                        return
+                    }
+                }
+                if Date().timeIntervalSince(start) + interval > timeout {
+                    throw IOSError.waitTimedOut(query: query, seconds: timeout, gone: gone, covered: !gone && coveredMatch)
+                }
+                Thread.sleep(forTimeInterval: interval)
+            }
+        }
+    }
+
+    struct ScrollTo: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "scroll-to",
+            abstract: "Scroll until an element is on screen, then print it (tap it next with --id / --label).",
+            discussion: """
+            If the element exists off screen, scrolls toward it; otherwise (lazy lists create rows only when \
+            shown) scrolls in --direction. By default it scrolls up (finger up, revealing content further \
+            down) and, at the end, back the other way. Stops when the content stops moving.
+            """
+        )
+        @OptionGroup var global: GlobalOptions
+        @OptionGroup var automation: AutomationOptions
+        @Option(help: "Accessibility identifier to scroll to.") var id: String?
+        @Option(help: "Label to scroll to (exact, ignoring case).") var label: String?
+        @Option(help: "Finger direction when the element isn't found yet: up, down, left or right. Default: up, then back down if the end is reached.") var direction: String?
+        @Option(help: "Give up after this many swipes.") var maxSwipes = 15
+
+        func validate() throws {
+            if (id == nil) == (label == nil) { throw ValidationError("Pass --id or --label.") }
+            if let direction, !["up", "down", "left", "right"].contains(direction) { throw ValidationError("--direction must be up, down, left or right.") }
+            if !(1...100).contains(maxSwipes) { throw ValidationError("--max-swipes must be 1–100.") }
+        }
+
+        func run() throws {
+            let session = try automation.session()
+            let query = id.map { "id '\($0)'" } ?? "label '\(label ?? "")'"
+            let start = Date()
+            let opposite = ["up": "down", "down": "up", "left": "right", "right": "left"]
+            var way = direction ?? "up"
+            var reversed = direction != nil // only the default direction turns back at the end
+            var previous: [LayoutElement]?
+            for swipes in 0...maxSwipes {
+                let tree = try snapshot(session)
+                let screen = Layout.screen(of: tree)
+                let elements = Layout.flatten(tree)
+                if let match = Layout.find(in: elements, id: id, label: label, exactLabel: true), !match.covered,
+                   Layout.visibleFraction(match, screen: screen) >= 0.6 || match.frame.height > screen.height / 2 {
+                    let action = swipes == 0 ? "Already on screen:" : "Scrolled (\(swipes) swipe\(swipes == 1 ? "" : "s")) to"
+                    try Input.report(Result(action: action, point: match.center, element: match, elapsed: Date().timeIntervalSince(start)), json: global.json)
+                    return
+                }
+                // Same elements in the same places as before the last swipe: nothing more to reveal.
+                if let previous, previous.map(\.textLine) == elements.map(\.textLine) {
+                    guard !reversed else { throw IOSError.scrollTargetNotFound(query: query, swipes: swipes, reachedEnd: true) }
+                    reversed = true
+                    way = opposite[way]!
+                }
+                if swipes == maxSwipes { break }
+                previous = elements
+                // An element that exists off screen says which way to go; lazy lists don't have it yet.
+                let toward = Layout.locate(in: tree, id: id, label: label, exactLabel: true)
+                    .flatMap { Layout.scrollDirection(toward: $0.frame, screen: screen) }
+                guard let (from, to) = Layout.swipePoints(direction: toward ?? way, screen: screen, reach: 0.32) else { break }
+                _ = try session.send("swipe \(from.x) \(from.y) \(to.x) \(to.y) 0.05 0.1")
+            }
+            throw IOSError.scrollTargetNotFound(query: query, swipes: maxSwipes, reachedEnd: false)
         }
     }
 
