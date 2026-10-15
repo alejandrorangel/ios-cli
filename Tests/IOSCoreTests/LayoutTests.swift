@@ -109,3 +109,39 @@ private func tree() throws -> UIElementNode {
     let elements = Layout.flatten(try Layout.parse(try JSONSerialization.jsonObject(with: Data(json.utf8))))
     #expect(elements.compactMap(\.id) == ["transport-play", "count-in", "guitar-volume"])
 }
+
+@Test func marksElementsCoveredByAFullScreenPresentation() throws {
+    // Window layers: the root screen, a full-screen cover, then a sheet container (full-screen with
+    // a dimming region). Only the sheet is on top; the other layers are covered.
+    let json = #"""
+    {"type": 2, "frame": [0, 0, 402, 874], "children": [
+      {"type": 4, "frame": [0, 0, 402, 874], "children": [
+        {"type": 1, "frame": [0, 0, 402, 874], "children": [
+          {"type": 9, "id": "open-practice", "label": "Practice Session", "frame": [138, 441, 126, 20]}]},
+        {"type": 1, "frame": [0, 0, 402, 874], "children": [
+          {"type": 9, "id": "open-settings", "label": "Track Settings", "frame": [146, 461, 109, 20]}]},
+        {"type": 1, "frame": [0, 0, 402, 874], "children": [
+          {"type": 40, "id": "count-in", "label": "Count In", "frame": [23, 588, 355, 27]},
+          {"type": 9, "label": "Track Settings", "frame": [146, 700, 109, 20]}]}
+      ]}
+    ]}
+    """#
+    let elements = Layout.flatten(try Layout.parse(try JSONSerialization.jsonObject(with: Data(json.utf8))))
+    let covered = Dictionary(uniqueKeysWithValues: elements.map { ($0.id ?? "sheet-\($0.label ?? "")", $0.covered) })
+    #expect(covered == ["open-practice": true, "open-settings": true, "count-in": false, "sheet-Track Settings": false])
+    // A label on both a covered layer and the top layer resolves to the one on top.
+    #expect(Layout.find(in: elements, label: "Track Settings")?.center.y == 710)
+    #expect(elements.first { $0.id == "open-practice" }?.textLine.contains("covered") == true)
+}
+
+@Test func aimsAtTheControlOfALabeledToggle() throws {
+    let json = #"""
+    {"type": 2, "frame": [0, 0, 402, 874], "children": [{"type": 4, "frame": [0, 0, 402, 874], "children": [
+      {"type": 40, "id": "count-in", "label": "Count In", "frame": [23, 588, 355, 27], "children": [
+        {"type": 48, "label": "Count In", "frame": [23, 592, 62, 20]},
+        {"type": 40, "frame": [320, 588, 60, 27]}]}
+    ]}]}
+    """#
+    let elements = Layout.flatten(try Layout.parse(try JSONSerialization.jsonObject(with: Data(json.utf8))))
+    #expect(Layout.find(in: elements, id: "count-in")?.center == Point(x: 350, y: 601.5))
+}

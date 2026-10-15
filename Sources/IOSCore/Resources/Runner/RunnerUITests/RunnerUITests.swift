@@ -29,6 +29,47 @@ final class RunnerUITests: XCTestCase {
         }
     }
 
+    static let includeNonModal = NSSelectorFromString("includingNonModalElements")
+    static var canIncludeNonModal: Bool { XCUIElement.instancesRespond(to: includeNonModal) }
+
+    /// Accessibility hides everything beside a modal view, and XCUITest snapshots honor that. A
+    /// SwiftUI .fullScreenCover is modal, so a .sheet presented on top of it vanished from the tree
+    /// (VoiceOver and XCUITest's own debugDescription still see it). XCUIElement's private
+    /// includingNonModalElements returns a copy whose snapshots and queries skip that pruning;
+    /// fall back to the element itself if a future Xcode removes it.
+    static func unpruned(_ element: XCUIElement) -> XCUIElement {
+        guard canIncludeNonModal,
+              let copy = element.perform(includeNonModal)?.takeUnretainedValue() as? XCUIElement else { return element }
+        return copy
+    }
+
+    /// XCTest's own snapshot parameters (maxDepth, maxChildren, snapshotKeyHonorModalViews, …).
+    static func defaultSnapshotParameters() -> [String: Any]? {
+        // Xcode 27 reaches the accessibility client (XCAXClient_iOS) through XCUIDevice.
+        let device = XCUIDevice.shared as NSObject
+        guard
+            device.responds(to: NSSelectorFromString("accessibilityInterface")),
+            let client = device.perform(NSSelectorFromString("accessibilityInterface"))?.takeUnretainedValue() as? NSObject,
+            client.responds(to: NSSelectorFromString("defaultParameters")),
+            let defaults = client.perform(NSSelectorFromString("defaultParameters"))?.takeUnretainedValue() as? [String: Any]
+        else { return nil }
+        return defaults
+    }
+
+    /// A snapshot that doesn't prune elements beside modal views (see `unpruned`): XCTest's default
+    /// parameters with snapshotKeyHonorModalViews off, through XCUIElement's private
+    /// snapshotWithParameters:error:. Falls back to the public snapshot() if either is missing.
+    static func fullSnapshot(_ element: XCUIElement) throws -> XCUIElementSnapshot {
+        let selector = NSSelectorFromString("snapshotWithParameters:error:")
+        guard element.responds(to: selector), var parameters = defaultSnapshotParameters() else { return try element.snapshot() }
+        parameters["snapshotKeyHonorModalViews"] = false
+        typealias SnapshotWithParameters = @convention(c) (AnyObject, Selector, NSDictionary, AutoreleasingUnsafeMutablePointer<NSError?>?) -> AnyObject?
+        let call = unsafeBitCast(element.method(for: selector), to: SnapshotWithParameters.self)
+        var error: NSError?
+        if let snapshot = call(element, selector, parameters as NSDictionary, &error) as? XCUIElementSnapshot { return snapshot }
+        return try element.snapshot()
+    }
+
     func testServe() throws {
         continueAfterFailure = true
         let skipped = Self.skipIdleWaits()
@@ -123,7 +164,8 @@ final class RunnerUITests: XCTestCase {
         switch parts.first ?? "" {
         case "ping":
             let bundle: Any = app == nil ? NSNull() : currentBundle
-            return ["bundleIdentifier": bundle]
+            return ["bundleIdentifier": bundle, "includesNonModalElements": Self.canIncludeNonModal,
+                    "snapshotDefaults": Self.defaultSnapshotParameters().map { $0.mapValues { "\($0)" } } ?? [:]]
 
         case "activate":
             guard !argument.isEmpty else { throw RunnerError(message: "usage: activate <bundle id>") }
@@ -134,11 +176,11 @@ final class RunnerUITests: XCTestCase {
             return ["bundleIdentifier": argument, "state": target.state.rawValue]
 
         case "snapshot":
-            let target = try currentApp()
+            let target = Self.unpruned(try currentApp())
             // Snapshots only carry tvOS-style focus; find the keyboard focus with a query.
             let focused = target.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
             keyboardFocus = focused.exists ? (focused.elementType, focused.frame) : nil
-            return node(try target.snapshot())
+            return node(try Self.fullSnapshot(target))
 
         case "describe":
             return try currentApp().debugDescription
@@ -160,7 +202,7 @@ final class RunnerUITests: XCTestCase {
             return "ok"
 
         case "type":
-            let target = try currentApp()
+            let target = Self.unpruned(try currentApp())
             let focused = target.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
             guard focused.exists else { throw RunnerError(message: "no element has keyboard focus; tap a text field first") }
             focused.typeText(argument)

@@ -61,6 +61,9 @@ public struct LayoutElement: Codable, Equatable, Sendable {
     public let enabled: Bool
     public let selected: Bool
     public let focused: Bool
+    /// Behind a later full-screen presentation (e.g. the screen under a full-screen cover):
+    /// listed for context, but a tap at its point lands on what covers it.
+    public let covered: Bool
 
     public var textLine: String {
         var parts = ["[\(index)] \(type)"]
@@ -71,6 +74,7 @@ public struct LayoutElement: Codable, Equatable, Sendable {
         if !enabled { parts.append("disabled") }
         if selected { parts.append("selected") }
         if focused { parts.append("focused") }
+        if covered { parts.append("covered") }
         parts.append("@(\(Int(center.x.rounded())),\(Int(center.y.rounded())))")
         return parts.joined(separator: " ")
     }
@@ -127,27 +131,43 @@ public enum Layout {
         let windows = root.children.filter { $0.type == "Window" && !$0.frame.isEmpty }.map(\.frame)
         let screen = !root.frame.isEmpty ? root.frame : windows.reduce(windows.first ?? root.frame) { $0.union($1) }
         var out: [LayoutElement] = []
-        func visit(_ n: UIElementNode, insideKeyboard: Bool) {
+        func visit(_ n: UIElementNode, insideKeyboard: Bool, covered: Bool) {
             let keyboard = insideKeyboard || n.type == "Keyboard"
             let meaningful = n.id != nil || n.label != nil || n.value != nil || n.placeholder != nil || interactiveTypes.contains(n.type)
-            if meaningful, !keyboard, !["Application", "Window"].contains(n.type), let visible = n.frame.intersection(screen), !visible.isEmpty {
+            // A labeled SwiftUI Toggle is a row-wide Switch whose actual control is a nested Switch;
+            // tapping the row's centre hits the label, which doesn't toggle. Aim at the control.
+            let target = n.type == "Switch" ? (n.children.first { $0.type == "Switch" }?.frame ?? n.frame) : n.frame
+            if meaningful, !keyboard, !["Application", "Window"].contains(n.type),
+               let visible = target.intersection(screen) ?? n.frame.intersection(screen), !visible.isEmpty {
                 out.append(LayoutElement(
                     index: out.count + 1, type: n.type, id: n.id, label: n.label, value: n.value, placeholder: n.placeholder,
                     frame: n.frame, center: Point(x: visible.x + visible.width / 2, y: visible.y + visible.height / 2),
-                    enabled: n.enabled, selected: n.selected, focused: n.focused
+                    enabled: n.enabled, selected: n.selected, focused: n.focused, covered: covered
                 ))
             }
-            n.children.forEach { visit($0, insideKeyboard: keyboard) }
+            // A window's children are its presentation layers in order (screen, full-screen cover,
+            // sheet…); a layer is covered when a later sibling spans the whole window.
+            let coveringFrom = n.type == "Window" ? n.children.lastIndex { covers($0.frame, n.frame) } : nil
+            for (index, child) in n.children.enumerated() {
+                visit(child, insideKeyboard: keyboard, covered: covered || (coveringFrom.map { index < $0 } ?? false))
+            }
         }
-        visit(root, insideKeyboard: false)
+        visit(root, insideKeyboard: false, covered: false)
         return out
+    }
+
+    /// True when `frame` spans (nearly) all of `area`.
+    static func covers(_ frame: Rect, _ area: Rect) -> Bool {
+        guard let overlap = frame.intersection(area), !area.isEmpty else { return false }
+        return overlap.width * overlap.height >= 0.95 * area.width * area.height
     }
 
     /// Finds the element to act on: exact identifier, else exact label, else label containing
     /// the text (case-insensitive). Interactive elements win over static ones.
     public static func find(in elements: [LayoutElement], id: String? = nil, label: String? = nil) -> LayoutElement? {
         func best(_ matches: [LayoutElement]) -> LayoutElement? {
-            matches.first { interactiveTypes.contains($0.type) } ?? matches.first
+            let ranked = matches.filter { !$0.covered } + matches.filter(\.covered) // what's on top first
+            return ranked.first { interactiveTypes.contains($0.type) } ?? ranked.first
         }
         if let id { return best(elements.filter { $0.id == id }) }
         guard let label else { return nil }

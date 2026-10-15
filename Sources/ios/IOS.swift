@@ -7,7 +7,7 @@ struct IOS: ParsableCommand {
         commandName: "ios",
         abstract: "iOS development from the command line, for people and AI agents.",
         discussion: "Pass --json to any command for machine-readable output. See PLAN.md for the roadmap.",
-        version: "0.2.0",
+        version: "0.2.1",
         subcommands: [
             Info.self,
             Sim.self,
