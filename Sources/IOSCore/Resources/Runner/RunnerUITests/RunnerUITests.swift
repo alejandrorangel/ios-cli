@@ -185,7 +185,12 @@ final class RunnerUITests: XCTestCase {
                 let focused = target.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
                 keyboardFocus = focused.exists ? (focused.elementType, focused.frame) : nil
             }
-            return node(snapshot)
+            var tree = node(snapshot)
+            // Permission prompts and other system alerts belong to SpringBoard, not the app, so the
+            // app's snapshot doesn't show them even though they cover it.
+            let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+            if alert.exists, let alertSnapshot = try? alert.snapshot() { tree["systemAlert"] = node(alertSnapshot) }
+            return tree
 
         case "voiceover":
             // "voiceover on|off" toggles VoiceOver (e.g. to present screens the way a VoiceOver user

@@ -23,6 +23,18 @@ If `ios` isn't on the PATH, install it from the ios-cli repository: `scripts/ins
 - `ios info` — active Xcode, booted simulators, connected devices.
 - `ios sim list [--booted]`, `ios device list` — targets with UDIDs.
 
+## Simulator and app state
+
+Simulator commands use `--device`, else the only booted simulator. Use them to set up a test state instead of tapping through Settings.
+
+- `ios sim boot` (no `--device`: default iPhone), `ios sim shutdown`, `ios sim create <Name> --type "iPhone 17 Pro" --boot`, `ios sim delete --device D`.
+- `ios sim erase` — wipe all apps, data and permissions (reboots a booted simulator). The only way to reset notification permission.
+- `ios sim privacy reset <service> [--bundle-id B]` — make a permission prompt appear again (photos, location, microphone, contacts, calendar…); `grant`/`revoke` skip the prompt.
+- `ios sim appearance dark|light`, `ios sim content-size accessibility-large` — check dark mode and Dynamic Type layouts.
+- `ios sim location 37.3349,-122.0090` / `clear`; `ios sim push --bundle-id B --title T --body "…"` (needs notification permission); `ios sim status-bar --clean` before screenshots.
+- `ios app open-url myapp://path` — test deep links and universal links (simulator or device).
+- `ios app list`, `ios app launch|terminate|uninstall --bundle-id B` — simulator or device. `ios screen record --duration 5 -o clip.mp4` (simulator).
+
 ## Build and run
 
 - `ios describe [--scheme S]` — schemes; with a scheme, the apps it builds (bundle ID, product path). Cached until project files change.
@@ -40,7 +52,7 @@ If `ios` isn't on the PATH, install it from the ios-cli repository: `scripts/ins
 ## Screen, layout and input
 
 - `ios screen capture --device D -o shot.png` — screenshot.
-- `ios layout --bundle-id B --device D` — visible elements: `[n] Type id=… "label" value=… @(x,y)`. The last app is remembered per device.
+- `ios layout --bundle-id B --device D` — visible elements: `[n] Type id=… "label" value=… @(x,y)`. The last app is remembered per device. A system alert (e.g. a permission prompt) is listed last with its buttons, and the app's elements are marked `covered`; tap `--label Allow` to answer it.
 - `ios input tap --id <identifier>` (best) / `--label <text>` / `<x> <y>` — taps the element's visible centre.
 - `ios input type <text>` — types into the focused field; tap the field first (an unfocused `type` fails with a clear error).
 - `ios input swipe --direction up|down|left|right`, `ios input doubletap …`, `ios input button home`.

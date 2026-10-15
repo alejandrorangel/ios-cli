@@ -65,6 +65,25 @@ All planned commands work. Every command accepts `--json` for machine-readable o
 | `ios sim list [--booted]` | Available simulators |
 | `ios device list` | Paired physical devices (reads `devicectl` JSON v5, falls back to older fields) |
 | `ios screen capture [-o file.png]` | Screenshot of a simulator or device |
+| `ios screen record [--duration 10] [-o file.mp4]` | Records a simulator's screen (H.264), timed from the first frame |
+
+### Simulators and apps
+
+Simulator commands act on `--device` (name or UDID), else the only booted simulator.
+
+| Command | What it does |
+|---|---|
+| `ios sim create <Name> [--type "iPhone 17 Pro"] [--os 27.0] [--boot]` | New simulator (newest runtime by default) |
+| `ios sim boot [--show]`, `ios sim shutdown [--all]` | Boot and wait until ready (no `--device`: the default iPhone on the newest iOS); shut down |
+| `ios sim erase`, `ios sim delete --device D` | Erase all content and settings (a booted simulator is rebooted); delete |
+| `ios sim appearance [light\|dark]`, `ios sim content-size [size\|increment\|decrement]` | Dark mode and Dynamic Type; without a value, prints the current one |
+| `ios sim location <lat,lon>\|clear` | Simulated location |
+| `ios sim privacy grant\|revoke\|reset <service> [--bundle-id B]` | Permissions (photos, location, microphone, contacts…); `reset` makes the app prompt again |
+| `ios sim push --bundle-id B (--title T --body … \| payload.json)` | Simulated push notification |
+| `ios sim status-bar --clean [--battery 42 …] \| --clear` | Status bar overrides for screenshots (9:41, full battery and signal) |
+| `ios app list [--all]` | Installed apps (simulator or device; yours unless `--all`) |
+| `ios app launch\|terminate\|uninstall --bundle-id B` | App control on a simulator or device |
+| `ios app open-url <url>` | Open a deep link or universal link as if tapped |
 
 ### Build and run
 
@@ -81,7 +100,7 @@ All planned commands work. Every command accepts `--json` for machine-readable o
 
 | Command | What it does |
 |---|---|
-| `ios layout [--bundle-id B] [--full]` | Visible elements with type, identifier, label, value, state and tap point |
+| `ios layout [--bundle-id B] [--full]` | Visible elements with type, identifier, label, value, state and tap point. A system alert (permission prompt) is listed on top, with the app's elements marked `covered` |
 | `ios layout --voiceover [--max N]` | What VoiceOver reads on the screen, in its navigation order (iOS 27+, via `XCUIVoiceOverService`). Unlike the element list, views hidden from accessibility don't appear, so use it to check accessibility. Items read from a system alert (Low Battery, permission prompts) are flagged. VoiceOver is switched back off afterwards |
 | `ios layout --swiftui [--relaunch]` | The app's SwiftUI view tree (its own views, stacks, lists, `Text` with its string). `--relaunch` restarts the app with SwiftUI's debug data on; navigate with `ios input`, then read again. Debug builds only |
 | `ios input tap --id I` / `--label L` / `<x> <y>` | Tap an element or a point |

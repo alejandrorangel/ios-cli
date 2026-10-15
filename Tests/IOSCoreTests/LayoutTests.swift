@@ -163,3 +163,21 @@ private func tree() throws -> UIElementNode {
     #expect(elements.map { $0.id ?? $0.label ?? "?" } == ["count-in", "submitButton", "Required"])
     #expect(elements[0].center == Point(x: 350, y: 601.5)) // still aims at the inner switch
 }
+
+@Test func systemAlertCoversTheApp() throws {
+    let json = #"""
+    {"type": 2, "frame": [0, 0, 402, 874], "children": [
+      {"type": 4, "frame": [0, 0, 402, 874], "children": [
+        {"type": 9, "id": "ask", "label": "Ask for Notifications", "frame": [100, 600, 200, 20]}
+      ]}
+    ], "systemAlert": {"type": 7, "label": "“App” Would Like to Send You Notifications", "frame": [30, 300, 342, 300], "children": [
+      {"type": 9, "label": "Don’t Allow", "frame": [40, 480, 322, 50]},
+      {"type": 9, "label": "Allow", "frame": [40, 540, 322, 50]},
+      {"type": 1, "label": "Vertical scroll bar, 2 pages", "value": "0%", "frame": [360, 300, 10, 100]}
+    ]}}
+    """#
+    let elements = Layout.flatten(try Layout.parse(try JSONSerialization.jsonObject(with: Data(json.utf8))))
+    #expect(elements.map(\.type) == ["Button", "Alert", "Button", "Button"])
+    #expect(elements.map(\.covered) == [true, false, false, false])
+    #expect(Layout.find(in: elements, label: "Allow")?.center == Point(x: 201, y: 565))
+}

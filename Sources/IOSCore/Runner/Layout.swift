@@ -105,8 +105,18 @@ public enum Layout {
         guard let dict = object as? [String: Any] else {
             throw IOSError.invalidOutput(tool: "runner snapshot", reason: "not an object")
         }
-        return node(dict)
+        let root = node(dict)
+        // The runner attaches SpringBoard's alert (a permission prompt…) separately; it becomes the
+        // top layer, over everything in the app.
+        guard let alert = dict["systemAlert"] as? [String: Any] else { return root }
+        let layer = UIElementNode(type: systemAlertLayer, id: nil, label: nil, value: nil, placeholder: nil, frame: root.frame,
+                                  enabled: true, selected: false, focused: false, children: [node(alert)])
+        return UIElementNode(type: root.type, id: root.id, label: root.label, value: root.value, placeholder: root.placeholder,
+                             frame: root.frame, enabled: root.enabled, selected: root.selected, focused: root.focused,
+                             children: root.children + [layer])
     }
+
+    static let systemAlertLayer = "SystemAlertLayer"
 
     private static func node(_ d: [String: Any]) -> UIElementNode {
         let raw = d["type"] as? Int ?? 1
@@ -133,7 +143,8 @@ public enum Layout {
         var out: [LayoutElement] = []
         func visit(_ n: UIElementNode, parent: UIElementNode?, insideKeyboard: Bool, covered: Bool) {
             let keyboard = insideKeyboard || n.type == "Keyboard"
-            let meaningful = n.id != nil || n.label != nil || n.value != nil || n.placeholder != nil || interactiveTypes.contains(n.type)
+            let meaningful = (n.id != nil || n.label != nil || n.value != nil || n.placeholder != nil || interactiveTypes.contains(n.type))
+                && !isScrollIndicator(n)
             // A labeled SwiftUI Toggle is a row-wide Switch whose actual control is a nested Switch;
             // tapping the row's centre hits the label, which doesn't toggle. Aim at the control.
             let target = n.type == "Switch" ? (n.children.first { $0.type == "Switch" }?.frame ?? n.frame) : n.frame
@@ -147,7 +158,9 @@ public enum Layout {
             }
             // A window's children are its presentation layers in order (screen, full-screen cover,
             // sheet…); a layer is covered when a later sibling spans the whole window.
-            let coveringFrom = n.type == "Window" ? n.children.lastIndex { covers($0.frame, n.frame) } : nil
+            // A system alert is modal: it covers the whole app.
+            let coveringFrom = n.type == "Window" ? n.children.lastIndex { covers($0.frame, n.frame) }
+                : parent == nil ? n.children.lastIndex { $0.type == systemAlertLayer } : nil
             for (index, child) in n.children.enumerated() {
                 visit(child, parent: n, insideKeyboard: keyboard, covered: covered || (coveringFrom.map { index < $0 } ?? false))
             }
@@ -163,6 +176,13 @@ public enum Layout {
         guard let parent, parent.label != nil, interactiveTypes.contains(parent.type) else { return false }
         if node.type == parent.type, node.id == nil, node.label == nil { return true }
         return node.type == "StaticText" && node.id == nil && node.label == parent.label
+    }
+
+    nonisolated(unsafe) private static let scrollIndicatorLabel = /^(Vertical|Horizontal) scroll bar, \d+ pages?$/
+
+    /// Scroll views' indicators ("Vertical scroll bar, 2 pages"): noise, and not tappable.
+    static func isScrollIndicator(_ node: UIElementNode) -> Bool {
+        node.type == "Other" && node.id == nil && (node.label.map { (try? scrollIndicatorLabel.wholeMatch(in: $0)) != nil } ?? false)
     }
 
     /// True when `frame` spans (nearly) all of `area`.

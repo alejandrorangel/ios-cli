@@ -36,9 +36,15 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
     case skillNotFound(name: String, available: [String])
     case skillExists(path: String)
     case skillNotInstalled(name: String, directory: String)
+    case simulatorOnly(command: String)
+    case simulatorNotBooted(name: String, udid: String)
 
     public var description: String {
         switch self {
+        case let .simulatorOnly(command):
+            return "`ios \(command)` works on simulators only; pass a simulator with --device."
+        case let .simulatorNotBooted(name, udid):
+            return "\(name) (\(udid)) isn't booted. Boot it with `ios sim boot --device \(udid)`."
         case let .previewNotFound(name, available, ambiguous):
             return (ambiguous ? "Several previews match '\(name)'; use a more specific name or --index."
                               : "No preview named '\(name)' in this file.") + Self.list(available, heading: "Previews")
