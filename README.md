@@ -27,6 +27,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 
 ```sh
 ios --version   # prints the installed version
+ios doctor      # checks Xcode, simulators, devices, signing, Xcode approval, docs and skills, with fixes
 ios info        # shows your Xcode, booted simulators and connected devices
 ```
 
@@ -62,6 +63,7 @@ All planned commands work. Every command accepts `--json` for machine-readable o
 | Command | What it does |
 |---|---|
 | `ios info` | Active Xcode, booted simulators, connected devices |
+| `ios doctor [--offline] [--skip-xcode-service]` | Read-only health check of everything ios-cli needs (Xcode and its first-launch setup, simulator runtimes, Developer Mode, signing, Xcode's approval of `ios`, docs index, skills, PATH, newer release), each problem with its fix. Exits non-zero only on blocking problems |
 | `ios sim list [--booted]` | Available simulators |
 | `ios device list` | Paired physical devices (reads `devicectl` JSON v5, falls back to older fields) |
 | `ios screen capture [-o file.png]` | Screenshot of a simulator or device |

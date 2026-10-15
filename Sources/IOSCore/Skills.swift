@@ -156,6 +156,19 @@ public enum SkillManager {
         return try add(managed, into: target, force: false, progress: progress)
     }
 
+    /// Skills installed by `ios skills` whose SKILL.md differs from the version this build would install.
+    public static func outdated(in target: URL) throws -> [String] {
+        outdated(in: target, sources: try sources())
+    }
+
+    static func outdated(in target: URL, sources: [Source]) -> [String] {
+        sources.compactMap { source in
+            let installed = target.appendingPathComponent(source.name)
+            guard isManaged(installed), let current = try? Data(contentsOf: installed.appendingPathComponent("SKILL.md")) else { return nil }
+            return (try? Data(contentsOf: source.folder.appendingPathComponent("SKILL.md"))) == current ? nil : source.name
+        }
+    }
+
     static func isManaged(_ folder: URL) -> Bool {
         FileManager.default.fileExists(atPath: folder.appendingPathComponent(markerName).path)
     }

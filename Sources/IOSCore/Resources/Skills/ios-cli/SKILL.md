@@ -21,6 +21,7 @@ If `ios` isn't on the PATH, install it from the ios-cli repository: `scripts/ins
 ## Environment
 
 - `ios info` — active Xcode, booted simulators, connected devices.
+- `ios doctor` — when a command fails for an unclear reason (Xcode not selected or not approved, no simulator runtime, Developer Mode off, stale skills): read-only, prints each problem with its fix. Tell the user about fixes that need them (sudo, dialogs, device settings).
 - `ios sim list [--booted]`, `ios device list` — targets with UDIDs.
 
 ## Simulator and app state
