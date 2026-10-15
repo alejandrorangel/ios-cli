@@ -131,13 +131,13 @@ public enum Layout {
         let windows = root.children.filter { $0.type == "Window" && !$0.frame.isEmpty }.map(\.frame)
         let screen = !root.frame.isEmpty ? root.frame : windows.reduce(windows.first ?? root.frame) { $0.union($1) }
         var out: [LayoutElement] = []
-        func visit(_ n: UIElementNode, insideKeyboard: Bool, covered: Bool) {
+        func visit(_ n: UIElementNode, parent: UIElementNode?, insideKeyboard: Bool, covered: Bool) {
             let keyboard = insideKeyboard || n.type == "Keyboard"
             let meaningful = n.id != nil || n.label != nil || n.value != nil || n.placeholder != nil || interactiveTypes.contains(n.type)
             // A labeled SwiftUI Toggle is a row-wide Switch whose actual control is a nested Switch;
             // tapping the row's centre hits the label, which doesn't toggle. Aim at the control.
             let target = n.type == "Switch" ? (n.children.first { $0.type == "Switch" }?.frame ?? n.frame) : n.frame
-            if meaningful, !keyboard, !["Application", "Window"].contains(n.type),
+            if meaningful, !keyboard, !["Application", "Window"].contains(n.type), !repeatsParent(n, parent),
                let visible = target.intersection(screen) ?? n.frame.intersection(screen), !visible.isEmpty {
                 out.append(LayoutElement(
                     index: out.count + 1, type: n.type, id: n.id, label: n.label, value: n.value, placeholder: n.placeholder,
@@ -149,11 +149,20 @@ public enum Layout {
             // sheet…); a layer is covered when a later sibling spans the whole window.
             let coveringFrom = n.type == "Window" ? n.children.lastIndex { covers($0.frame, n.frame) } : nil
             for (index, child) in n.children.enumerated() {
-                visit(child, insideKeyboard: keyboard, covered: covered || (coveringFrom.map { index < $0 } ?? false))
+                visit(child, parent: n, insideKeyboard: keyboard, covered: covered || (coveringFrom.map { index < $0 } ?? false))
             }
         }
-        visit(root, insideKeyboard: false, covered: false)
+        visit(root, parent: nil, insideKeyboard: false, covered: false)
         return out
+    }
+
+    /// Children that add nothing to their labeled control: the inner switch of a labeled Toggle
+    /// (`Switch "Count In"` → unlabeled `Switch`), or a text repeating the control's label
+    /// (`Button "Sign in"` → `StaticText "Sign in"`). `--full` still shows them.
+    static func repeatsParent(_ node: UIElementNode, _ parent: UIElementNode?) -> Bool {
+        guard let parent, parent.label != nil, interactiveTypes.contains(parent.type) else { return false }
+        if node.type == parent.type, node.id == nil, node.label == nil { return true }
+        return node.type == "StaticText" && node.id == nil && node.label == parent.label
     }
 
     /// True when `frame` spans (nearly) all of `area`.

@@ -145,3 +145,21 @@ private func tree() throws -> UIElementNode {
     let elements = Layout.flatten(try Layout.parse(try JSONSerialization.jsonObject(with: Data(json.utf8))))
     #expect(Layout.find(in: elements, id: "count-in")?.center == Point(x: 350, y: 601.5))
 }
+
+@Test func collapsesChildrenThatRepeatTheirControl() throws {
+    let json = #"""
+    {"type": 2, "frame": [0, 0, 402, 874], "children": [{"type": 4, "frame": [0, 0, 402, 874], "children": [
+      {"type": 40, "id": "count-in", "label": "Count In", "value": "1", "frame": [23, 588, 355, 27], "children": [
+        {"type": 48, "label": "Count In", "frame": [23, 592, 62, 20]},
+        {"type": 40, "value": "1", "frame": [320, 588, 60, 27]}]},
+      {"type": 9, "id": "submitButton", "label": "Sign in", "frame": [20, 410, 362, 44], "children": [
+        {"type": 48, "label": "Sign in", "frame": [180, 420, 48, 24]},
+        {"type": 48, "label": "Required", "frame": [180, 440, 48, 10]}]}
+    ]}]}
+    """#
+    let elements = Layout.flatten(try Layout.parse(try JSONSerialization.jsonObject(with: Data(json.utf8))))
+    // The toggle's text and inner switch, and the button's repeated text, are collapsed;
+    // a child with different text stays.
+    #expect(elements.map { $0.id ?? $0.label ?? "?" } == ["count-in", "submitButton", "Required"])
+    #expect(elements[0].center == Point(x: 350, y: 601.5)) // still aims at the inner switch
+}
