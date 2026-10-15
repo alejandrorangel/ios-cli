@@ -31,10 +31,16 @@ fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-echo "Downloading ios from $REPO${VERSION:+ (v$VERSION)}…"
 BASE="https://github.com/$REPO/releases"
+if [ -z "$VERSION" ]; then
+    # Ask the API for the latest tag: the /releases/latest/download redirect is cached and can
+    # point at the previous release for a few minutes after a new one.
+    VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+        | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -1) || VERSION=""
+fi
 URL=${VERSION:+"$BASE/download/v$VERSION"}
 URL=${URL:-"$BASE/latest/download"}
+echo "Downloading ios ${VERSION:+v$VERSION }from ${REPO}…"
 if ! { curl -fsSL "$URL/$ASSET" -o "$TMP/$ASSET" && curl -fsSL "$URL/$ASSET.sha256" -o "$TMP/$ASSET.sha256"; }; then
     if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
         # Private repositories: `gh release download` without a tag picks the latest release.
