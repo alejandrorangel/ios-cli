@@ -145,7 +145,8 @@ public enum Doctor {
 
     static func install(version: String, checkLatest: Bool) -> [DoctorCheck] {
         var out: [DoctorCheck] = []
-        let running = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().path
+        // argv[0] is just "ios" when run from PATH, so ask for the executable's real location.
+        let running = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).resolvingSymlinksInPath().path
         let onPath = (try? Shell.run("/usr/bin/which", ["ios"]).stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
         if onPath.isEmpty {
             out.append(.warn("install", "ios \(version) isn't on PATH (running \(running))",
