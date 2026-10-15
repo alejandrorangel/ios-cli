@@ -14,10 +14,11 @@ public struct TestRequest: Sendable {
     public let withoutBuilding: Bool
     /// Rerun failing tests up to this many times (`-retry-tests-on-failure`).
     public let retries: Int?
+    public let team: String?
 
     public init(container: Container, scheme: String, configuration: String?, destination: Destination,
                 derivedDataPath: String?, only: [String], skip: [String], testPlan: String?,
-                withoutBuilding: Bool, retries: Int?) {
+                withoutBuilding: Bool, retries: Int?, team: String? = nil) {
         self.container = container
         self.scheme = scheme
         self.configuration = configuration
@@ -28,6 +29,7 @@ public struct TestRequest: Sendable {
         self.testPlan = testPlan
         self.withoutBuilding = withoutBuilding
         self.retries = retries
+        self.team = team
     }
 
     public func xcodebuildArguments(resultBundle: String) -> [String] {
@@ -40,7 +42,7 @@ public struct TestRequest: Sendable {
         if let retries, retries > 0 {
             arguments += ["-retry-tests-on-failure", "-test-iterations", String(retries + 1)]
         }
-        return arguments
+        return arguments + Signing.arguments(team: team, destination: destination)
     }
 }
 
@@ -87,6 +89,8 @@ public struct TestResult: Codable, Sendable {
     public let issues: [String]
     public let log: String
     public let resultBundle: String?
+    /// What to do about a signing failure, when the build errors show one.
+    public let hint: String?
 }
 
 public enum TestRunner {
@@ -131,7 +135,8 @@ public enum TestRunner {
             buildErrors: buildErrors,
             issues: issues,
             log: log.path,
-            resultBundle: hasBundle ? bundle.path : nil
+            resultBundle: hasBundle ? bundle.path : nil,
+            hint: Signing.hint(for: buildErrors, team: request.team)
         )
     }
 

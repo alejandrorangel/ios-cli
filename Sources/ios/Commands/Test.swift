@@ -18,6 +18,7 @@ struct TestCommand: ParsableCommand {
     @OptionGroup var global: GlobalOptions
     @OptionGroup var project: ProjectOptions
     @OptionGroup var target: TargetOptions
+    @OptionGroup var signing: SigningOptions
 
     @Option(help: "Run only this test target, suite or test, e.g. AppTests/LoginTests/testEmpty (repeatable).")
     var only: [String] = []
@@ -44,7 +45,7 @@ struct TestCommand: ParsableCommand {
         let result = try TestRunner.run(TestRequest(
             container: container, scheme: scheme, configuration: project.configuration,
             destination: .target(resolved), derivedDataPath: project.derivedDataPath,
-            only: only, skip: skip, testPlan: testPlan, withoutBuilding: noBuild, retries: retries
+            only: only, skip: skip, testPlan: testPlan, withoutBuilding: noBuild, retries: retries, team: signing.team
         ))
         try Output.emit(result, json: global.json) { result.textSummary }
         if !result.succeeded { throw ExitCode.failure }
@@ -75,6 +76,7 @@ extension TestResult {
             }
         }
         lines += issues.map { "  \($0)" }
+        if let hint { lines.append("Hint: \(hint)") }
         lines.append("Log: \(log)")
         if let resultBundle { lines.append("Result bundle: \(resultBundle)") }
         return lines.joined(separator: "\n")

@@ -10,6 +10,7 @@ struct Build: ParsableCommand {
     @OptionGroup var global: GlobalOptions
     @OptionGroup var project: ProjectOptions
     @OptionGroup var destination: DestinationOptions
+    @OptionGroup var signing: SigningOptions
 
     func run() throws {
         let container = try project.container()
@@ -18,7 +19,7 @@ struct Build: ParsableCommand {
 
         let result = try Builder.build(BuildRequest(
             container: container, scheme: scheme, configuration: project.configuration,
-            destination: try destination.destination(), derivedDataPath: project.derivedDataPath
+            destination: try destination.destination(), derivedDataPath: project.derivedDataPath, team: signing.team
         ))
         try Output.emit(result, json: global.json) { result.textSummary }
         if !result.succeeded { throw ExitCode.failure }

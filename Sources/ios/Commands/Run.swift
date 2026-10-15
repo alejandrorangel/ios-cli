@@ -10,6 +10,7 @@ struct Run: ParsableCommand {
     @OptionGroup var global: GlobalOptions
     @OptionGroup var project: ProjectOptions
     @OptionGroup var target: TargetOptions
+    @OptionGroup var signing: SigningOptions
 
     @Flag(help: "Install and launch the last build without building.")
     var noBuild = false
@@ -31,7 +32,7 @@ struct Run: ParsableCommand {
         if !noBuild {
             let result = try Builder.build(BuildRequest(
                 container: container, scheme: scheme, configuration: project.configuration,
-                destination: destination, derivedDataPath: project.derivedDataPath
+                destination: destination, derivedDataPath: project.derivedDataPath, team: signing.team
             ))
             guard result.succeeded else {
                 try Output.emit(result, json: global.json) { result.textSummary }

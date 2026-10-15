@@ -26,7 +26,16 @@ public enum RunnerBuild {
         let source = try sourceDirectory()
         var team: String?
         if case let .device(device) = target {
-            team = try signing.team ?? teamFromLocalProfiles(device: device.udid)
+            if let chosen = signing.team {
+                team = chosen
+            } else {
+                let detected = try teamFromLocalProfiles(device: device.udid)
+                team = detected.id
+                progress("Signing the UI automation runner with team \(detected.label), the only team with a local wildcard "
+                         + "development profile for this device"
+                         + (signing.allowProvisioningUpdates ? "" : "; nothing is registered in its account")
+                         + ". Pass --team or set IOS_CLI_TEAM to choose.")
+            }
         }
         let platform = target.isSimulator ? "iphonesimulator" : "iphoneos"
         let key = [Describer.cachedXcodeBuildForSymbols, platform, team ?? "adhoc", try sourceHash(source)].joined(separator: "-")
@@ -80,11 +89,17 @@ public enum RunnerBuild {
 
     /// Teams that have a local Xcode-managed wildcard development profile covering the device.
     /// Using one means the runner can be signed without changing anything in the developer account.
-    static func teamFromLocalProfiles(device udid: String) throws -> String {
+    struct DetectedTeam: Hashable {
+        let id: String
+        let name: String?
+        var label: String { name.map { "\(id) (\($0))" } ?? id }
+    }
+
+    static func teamFromLocalProfiles(device udid: String) throws -> DetectedTeam {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let dirs = ["Library/Developer/Xcode/UserData/Provisioning Profiles", "Library/MobileDevice/Provisioning Profiles"]
             .map { home.appendingPathComponent($0) }
-        var teams = Set<String>()
+        var teams = Set<DetectedTeam>()
         for dir in dirs {
             for file in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
             where file.pathExtension == "mobileprovision" {
@@ -98,11 +113,11 @@ public enum RunnerBuild {
                     (plist["ProvisionedDevices"] as? [String] ?? []).contains(udid),
                     let team = (plist["TeamIdentifier"] as? [String])?.first
                 else { continue }
-                teams.insert(team)
+                teams.insert(DetectedTeam(id: team, name: plist["TeamName"] as? String))
             }
         }
         guard teams.count == 1, let team = teams.first else {
-            throw IOSError.runnerTeamRequired(candidates: teams.sorted())
+            throw IOSError.runnerTeamRequired(candidates: teams.map(\.label).sorted())
         }
         return team
     }

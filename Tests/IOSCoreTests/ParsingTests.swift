@@ -100,3 +100,21 @@ private let devicectlLegacySample = """
     #expect(version == "27.0")
     #expect(build == "27A266a")
 }
+
+@Test func passesAnExplicitTeamForDeviceBuildsOnly() {
+    #expect(Signing.arguments(team: "ABCDE12345", destination: .genericDevice)
+            == ["DEVELOPMENT_TEAM=ABCDE12345", "CODE_SIGN_STYLE=Automatic", "-allowProvisioningUpdates"])
+    #expect(Signing.arguments(team: "ABCDE12345", destination: .genericSimulator).isEmpty)
+    #expect(Signing.arguments(team: nil, destination: .genericDevice).isEmpty)
+    let request = BuildRequest(container: .project("/src/App.xcodeproj"), scheme: "App", configuration: nil,
+                               destination: .genericDevice, derivedDataPath: nil, team: "ABCDE12345")
+    #expect(request.xcodebuildArguments.suffix(3).first == "DEVELOPMENT_TEAM=ABCDE12345")
+}
+
+@Test func hintsAtSigningFixes() {
+    let noTeam = Builder.parseDiagnostics(#"/src/App.xcodeproj: error: Signing for "App" requires a development team. Select a development team in the Signing & Capabilities editor. (in target 'App' from project 'App')"#)
+    #expect(Signing.hint(for: noTeam, team: nil)?.contains("--team") == true)
+    let noAccount = Builder.parseDiagnostics(#"/src/App.xcodeproj: error: No Account for Team "ABCDE12345". Add a new account in Accounts settings or verify that your accounts have valid credentials. (in target 'App' from project 'App')"#)
+    #expect(Signing.hint(for: noAccount, team: "ABCDE12345")?.hasPrefix("Xcode isn't signed in to the team ABCDE12345") == true)
+    #expect(Signing.hint(for: [], team: nil) == nil)
+}

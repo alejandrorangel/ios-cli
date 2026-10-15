@@ -42,6 +42,7 @@ Simulator commands use `--device`, else the only booted simulator. Use them to s
 - `ios run --scheme S --device D` — build, boot the simulator if needed, install, launch; prints the PID. `--no-build` reinstalls the last build.
 - `ios test --scheme S [--device D]` — runs the scheme's tests; prints passed/failed/skipped counts and each failure as `file:line: message` (`--json`: `failures[].failures[]`). Without --device it uses the booted simulator, else an iPhone simulator (never a physical device). Rerun one test with `--only <id>` using the id it printed (Target/Suite/test; XCTest ids drop the `()`, Swift Testing ids keep them); add `--no-build` when only test data changed. Build errors come back as `buildErrors`. Exits non-zero on failure.
 - `ios install <path.app> [--launch]` — install an app bundle.
+- **Signing on a physical device**: if a build fails with "requires a development team" (e.g. a project from `ios create`), the output has a `hint`. Ask the user which team should own the app, then pass `--team <TEAM_ID>` to `ios build|run|test`; it applies to that build only and may register the bundle ID in that team. Never pick a team from local profiles for an app yourself — they may belong to the user's employer.
 
 ## Logs
 

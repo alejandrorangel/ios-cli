@@ -24,6 +24,10 @@ public struct BuildResult: Codable, Sendable {
     /// First warnings only, to keep agent context small; the full list is in the log.
     public let warnings: [Diagnostic]
     public let log: String
+    /// The team passed with --team (nil: the project's own signing settings).
+    public let team: String?
+    /// What to do about a signing failure, when the errors show one.
+    public let hint: String?
 }
 
 public struct BuildRequest: Sendable {
@@ -32,13 +36,16 @@ public struct BuildRequest: Sendable {
     public let configuration: String?
     public let destination: Destination
     public let derivedDataPath: String?
+    public let team: String?
 
-    public init(container: Container, scheme: String, configuration: String?, destination: Destination, derivedDataPath: String?) {
+    public init(container: Container, scheme: String, configuration: String?, destination: Destination,
+                derivedDataPath: String?, team: String? = nil) {
         self.container = container
         self.scheme = scheme
         self.configuration = configuration
         self.destination = destination
         self.derivedDataPath = derivedDataPath
+        self.team = team
     }
 
     public var xcodebuildArguments: [String] {
@@ -46,7 +53,33 @@ public struct BuildRequest: Sendable {
         arguments += ["-scheme", scheme, "-destination", destination.xcodebuildValue]
         if let configuration { arguments += ["-configuration", configuration] }
         if let derivedDataPath { arguments += ["-derivedDataPath", derivedDataPath] }
-        return arguments
+        return arguments + Signing.arguments(team: team, destination: destination)
+    }
+}
+
+/// Signing for app builds. ios-cli never picks a team for an app: the project's settings are used
+/// unless --team is passed, because automatic signing registers the app's bundle ID in that team.
+public enum Signing {
+    /// Build settings for an explicit team, for this build only (the project isn't edited).
+    /// Simulator builds don't sign with a team, so nothing is added for them.
+    public static func arguments(team: String?, destination: Destination) -> [String] {
+        guard let team, destination.sdk == "iphoneos" else { return [] }
+        return ["DEVELOPMENT_TEAM=\(team)", "CODE_SIGN_STYLE=Automatic", "-allowProvisioningUpdates"]
+    }
+
+    /// A next step for signing errors in a build log's diagnostics.
+    public static func hint(for errors: [Diagnostic], team: String?) -> String? {
+        let messages = errors.map(\.message)
+        if messages.contains(where: { $0.contains("requires a development team") }) {
+            return "The project has no signing team for devices. Pass --team <TEAM_ID> (your team ID: Xcode → Settings → "
+                + "Accounts, or developer.apple.com → Membership). It's used for this build only, and Xcode registers the "
+                + "app's bundle ID in that team, so choose the team that should own the app."
+        }
+        if let message = messages.first(where: { $0.hasPrefix("No Account for Team") }) {
+            return "Xcode isn't signed in to the team" + (team.map { " \($0)" } ?? "") + " (\(message.prefix { $0 != "." }))."
+                + " Check the team ID, or add the account in Xcode → Settings → Accounts."
+        }
+        return nil
     }
 }
 
@@ -73,7 +106,9 @@ public enum Builder {
             errors: errors,
             warningCount: warnings.count,
             warnings: Array(warnings.prefix(maxWarnings)),
-            log: log.path
+            log: log.path,
+            team: Signing.arguments(team: request.team, destination: request.destination).isEmpty ? nil : request.team,
+            hint: status == 0 ? nil : Signing.hint(for: errors, team: request.team)
         )
     }
 

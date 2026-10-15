@@ -24,6 +24,14 @@ struct ProjectOptions: ParsableArguments {
     }
 }
 
+struct SigningOptions: ParsableArguments {
+    @Option(help: ArgumentHelp(
+        "Development team ID to sign with for physical devices, e.g. ABCDE12345.",
+        discussion: "Used for this build only (the project isn't edited), with automatic signing; Xcode may register the app's bundle ID and a profile in that team. Without it the project's own signing settings are used; ios-cli never picks a team for an app."
+    ))
+    var team: String?
+}
+
 enum PlatformChoice: String, ExpressibleByArgument, CaseIterable {
     case simulator, device
 
@@ -51,6 +59,8 @@ extension BuildResult {
         var lines = ["\(mark) in \(duration)s (\(errors.count) errors, \(warningCount) warnings)"]
         lines += errors.prefix(15).map { "  \($0.summary)" }
         if errors.count > 15 { lines.append("  … \(errors.count - 15) more errors") }
+        if let team { lines.append("Team: \(team) (from --team)") }
+        if let hint { lines.append("Hint: \(hint)") }
         lines.append("Log: \(log)")
         return lines.joined(separator: "\n")
     }

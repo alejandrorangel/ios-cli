@@ -90,11 +90,13 @@ Simulator commands act on `--device` (name or UDID), else the only booted simula
 | Command | What it does |
 |---|---|
 | `ios describe [--scheme S]` | Schemes; with a scheme, the apps it builds (bundle ID, product path). Cached until project files change |
-| `ios build --scheme S [--platform simulator\|device]` | Builds and summarizes errors and warnings (file, line, column); full log saved to a file; exits non-zero on failure |
-| `ios run --scheme S [--no-build]` | Build, boot the simulator if needed, install, launch (restarting the app); reports the PID |
-| `ios test --scheme S [--only T/Suite/test] [--skip …] [--test-plan P] [--no-build] [--retries N]` | Runs unit and UI tests; lists each failure with file:line and an id to pass back to `--only`; saves the log and `.xcresult`; exits non-zero on failure |
+| `ios build --scheme S [--platform simulator\|device] [--team ID]` | Builds and summarizes errors and warnings (file, line, column); full log saved to a file; exits non-zero on failure. Signing failures come with a hint |
+| `ios run --scheme S [--no-build] [--team ID]` | Build, boot the simulator if needed, install, launch (restarting the app); reports the PID |
+| `ios test --scheme S [--team ID] [--only T/Suite/test] [--skip …] [--test-plan P] [--no-build] [--retries N]` | Runs unit and UI tests; lists each failure with file:line and an id to pass back to `--only`; saves the log and `.xcresult`; exits non-zero on failure |
 | `ios install <path.app> [--launch]` | Install an app bundle (bundle ID read from its Info.plist) |
 | `ios logs --bundle-id B [--last 5m] [--launch] [--duration N]` | App logs. Simulator: follow or show the unified log. `--launch`: relaunch with the console attached (captures `print()`; required on devices, where the unified log needs root). `--json` prints NDJSON |
+
+**Signing for devices.** `ios build`, `run` and `test` use the project's signing settings. A project without a team (for example one from `ios create`) needs `--team <TEAM_ID>` for a physical device: it's applied to that build only, with automatic signing, so Xcode may register the app's bundle ID in that team. ios-cli never picks a team for an app. The UI automation runner is different: with no `--team` it uses the one team that has a local wildcard development profile for the device, says which, and changes nothing in that account.
 
 ### UI inspection and input
 
