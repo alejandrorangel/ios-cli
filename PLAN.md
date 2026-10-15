@@ -351,6 +351,17 @@ Finding: a device's unified log can't be read without root (`log: Must be root t
 - Output keeps the app's own types (any non-SDK module, so the app's own frameworks count) and SwiftUI structure (stacks, lists, navigation, `Text` with its string…); modifiers and internals are collapsed. Example (test app welcome screen, names changed): `WelcomeView → GeometryReader → ZStack → [Image, VStack → [Spacer, Image, VStack → Text "…" …]]`. `--raw` prints SwiftUI's unfiltered data.
 - Findings: SwiftUI lists children last-to-first (reversed to screen order); the debug data appears a few seconds after first render, so `--relaunch` retries (two reads, ~20 s); reading a running app takes ~4.4 s on a simulator. The relaunch → `ios input` → `layout --swiftui` workflow works (the runner activates the app without relaunching it). UIKit screens presented over SwiftUI don't appear (the SwiftUI views underneath do).
 
+**`preview` and `create` done (2026-10-15)** on a Swift MCP client for `xcrun mcpbridge` (`Sources/IOSCore/Bridge`):
+
+| Command | Result |
+|---|---|
+| `create SampleApp --org com.example --testing swift-testing` | 4.2 s; app + unit + UI test targets (Xcode 27's default "App" template is multiplatform; `--template ios-app` for iPhone/iPad only) |
+| `create --list-templates` | Templates with options (storage, CloudKit, testing system…) — options are only returned for filtered queries, so it filters by platform |
+| `preview SampleApp/ContentView.swift` | 20.3 s cold (builds), 0.37–0.51 s warm; lists variants (color scheme, contrast, control borders, Dynamic Type, orientation) and locales; `--variant "Color Scheme=Dark Appearance" --variant "Dynamic Type=AX 5"` verified visually |
+| created project → `describe` / `run` / `layout` | single scheme picked automatically; run 24.7 s (first build); layout shows the template's globe and "Hello, world!" |
+
+Findings: `RenderPreview` needs the file's project-navigator path, found via `XcodeGlob` by file name and matched on trailing folders; the approval dialog is only triggered by opening or creating a project (`XcodeListTemplates` alone just fails), so the error message tells the user which command triggers it; the approval carried over to rebuilt debug binaries and the installed release binary (so the per-binary-hash concern from Spike B didn't show up in practice). 47 unit tests.
+
 Tap points match the Xcode bridge's hit points exactly on the same screen ("Get started" (201,722), "Sign In" (201,788)). Behaviors to know: stopping a runner closes the app it drove (XCTest cleanup), so restarts relaunch it; reads right after launch can show the loading state. 40 unit tests.
 `iosd` daemon · `ios layout [--flat|--full]` · `ios input tap|swipe|type|button|rotate` · `ios screen resolve` · `ios preview render` · `ios create` · `ios test` · `ios check <file>` (diagnostics) — bridge first, XCUITest fallback.
 

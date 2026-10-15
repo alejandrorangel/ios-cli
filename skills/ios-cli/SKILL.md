@@ -69,6 +69,19 @@ Physical devices need **Settings → Developer → Enable UI Automation**, and t
 - `ios docs fetch doc://swiftui/navigationstack` — a page as markdown, with `doc://` links to follow.
 - `ios docs api SwiftUI.View.navigationDestination` — declaration, availability and doc comment from the installed SDK (first use of a module takes ~3–12 s). Objective-C-based modules (UIKit, AVFoundation) have declarations but little prose; use `docs fetch` for those.
 
+## SwiftUI previews
+
+- `ios preview Path/To/View.swift [--index N] [-o view.png]` — renders the file's `#Preview` (index 0 = first) to a PNG through Xcode. First render builds the project (~20 s+), then ~0.5 s. Look at the PNG to check a UI change without running the app.
+- The output lists available variants and locales; pass them back: `--variant "Color Scheme=Dark Appearance" --variant "Dynamic Type=AX 5"`, `--locale fr`. Use this to check dark mode, large text and localizations.
+- Run from the project directory (or pass `--workspace` / `--project`).
+
+## New projects
+
+- `ios create MyApp [--template app|ios-app|document-app|game|framework] [--storage swiftdata|coredata] [--testing swift-testing|xctest] [--org com.example] [-o dir]` — uses Xcode's own templates. Xcode 27's `app` template is multiplatform; `ios-app` is iPhone/iPad only.
+- `ios create --list-templates [--platform ios]` — templates and their options (`--option key=value` for others).
+
+`preview` and `create` go through Xcode's tool service: the first time, Xcode shows a dialog to approve `ios` — ask the user to approve it if a command reports "hasn't approved".
+
 ## Not available yet
 
-`ios preview`, `ios create` and `ios skills` exist but report "not implemented".
+`ios skills` exists but reports "not implemented".

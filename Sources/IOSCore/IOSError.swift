@@ -29,9 +29,20 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
     case noAppSelected
     case appNotRunning(bundleID: String)
     case swiftUIDumpFailed(reason: String)
+    case bridgeNotApproved(detail: String)
+    case bridgeFailed(tool: String, message: String)
 
     public var description: String {
         switch self {
+        case let .bridgeNotApproved(detail):
+            return """
+                Xcode hasn't approved `ios` to use its tools yet. Opening or creating a project (`ios preview …`, \
+                `ios create …`) makes Xcode ask; approve the dialog (or use Xcode's menu-bar extra, or \
+                `sudo xcrun mcp-server approve --for-24-hours`), then retry.
+                (\(detail.trimmingCharacters(in: .whitespacesAndNewlines)))
+                """
+        case let .bridgeFailed(tool, message):
+            return "Xcode's \(tool) failed: \(message.trimmingCharacters(in: .whitespacesAndNewlines))"
         case let .appNotRunning(bundleID):
             return "\(bundleID) isn't running. Start it with `ios layout --swiftui --relaunch --bundle-id \(bundleID)`."
         case let .swiftUIDumpFailed(reason):

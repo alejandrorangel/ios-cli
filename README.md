@@ -27,7 +27,12 @@ Skeleton (Phase 2 start). Working commands:
 | `ios input tap --id I \| --label L \| <x> <y>` | Tap an element (or point); also `doubletap`, `swipe <x1 y1 x2 y2> \| --direction up`, `type <text>`, `button home` |
 | `ios runner status \| stop [--device D]` | The UI automation runner behind `layout` and `input` |
 
-Every command accepts `--json`. Planned commands (`preview`, `create`, `skills`) exist and report their phase in PLAN.md.
+| `ios preview <File.swift> [--index N] [--variant "Color Scheme=Dark Appearance"] [--locale fr] [-o out.png]` | Renders a SwiftUI `#Preview` to PNG through Xcode (first render builds, ~20 s; then ~0.5 s); lists available variants and locales |
+| `ios create <Name> [--template app\|ios-app\|document-app\|game\|framework\|<id>] [--storage swiftdata] [--testing swift-testing] [--org com.example]` | New project from Xcode's own templates; `--list-templates` shows them with options |
+
+Every command accepts `--json`. The planned `skills` command exists and reports its phase in PLAN.md.
+
+`preview`, `create` and `--list-templates` use Xcode 27's tool service (`xcrun mcpbridge`; no Xcode window needed). Xcode asks you once to approve `ios` when a command first opens or creates a project (in testing, the approval carried over to rebuilt and installed binaries).
 
 ### UI automation (`layout`, `input`)
 
