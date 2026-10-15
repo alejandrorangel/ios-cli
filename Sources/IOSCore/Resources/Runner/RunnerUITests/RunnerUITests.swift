@@ -183,6 +183,13 @@ final class RunnerUITests: XCTestCase {
             return node(try Self.fullSnapshot(target))
 
         case "voiceover":
+            // "voiceover on|off" toggles VoiceOver (e.g. to present screens the way a VoiceOver user
+            // would, then walk them); "voiceover [max]" walks the screen.
+            if #available(iOS 27.0, *), argument == "on" || argument == "off" {
+                let service = XCUIDevice.shared.voiceOverService
+                if argument == "on" { try service.enable() } else { try service.disable() }
+                return ["enabled": service.isEnabled]
+            }
             return try voiceOverWalk(maxSteps: Int(argument) ?? 200)
 
         case "snapshot-public":
@@ -247,23 +254,29 @@ final class RunnerUITests: XCTestCase {
         defer { if !wasEnabled { try? service.disable() } }
 
         var spoken: [String] = []
-        if let first = try? service.currentSpeech().utterance, !first.isEmpty { spoken.append(first) }
+        if var first = try? service.currentSpeech().utterance, !first.isEmpty {
+            // VoiceOver announces the app's name with the first element ("MyApp 50% adjustable").
+            if let name = app?.label, !name.isEmpty, first.hasPrefix(name + " ") { first.removeFirst(name.count + 1) }
+            spoken.append(first)
+        }
         var same = 0
         var stoppedAtEnd = false
         for _ in 0..<maxSteps {
             guard let next = try? service.moveForward().utterance, !next.isEmpty else { continue }
-            // At the last element VoiceOver stays put and repeats it; three in a row means the end
-            // (two identical neighbours, like two "Mute, button" rows, are still recorded).
-            if next == spoken.last {
+            // At the last element VoiceOver stays put and repeats it; three in a row means the end.
+            // Utterances can be captured mid-speech, so the same element may come back shorter or
+            // longer: treat one being a prefix of the other as the same element (so two neighbours
+            // read identically are listed once).
+            if let last = spoken.last, next.hasPrefix(last) || last.hasPrefix(next) {
+                if next.count > last.count { spoken[spoken.count - 1] = next } // keep the fuller text
                 same += 1
                 if same >= 2 { stoppedAtEnd = true; break }
-            } else {
-                same = 0
+                continue
             }
+            same = 0
             spoken.append(next)
         }
-        // Drop the repeats recorded while detecting the end.
-        while stoppedAtEnd, spoken.count >= 2, spoken[spoken.count - 1] == spoken[spoken.count - 2] { spoken.removeLast() }
+
         return ["spoken": spoken, "complete": stoppedAtEnd, "voiceOverWasOn": wasEnabled]
     }
 
