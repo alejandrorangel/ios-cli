@@ -40,6 +40,7 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
     case waitTimedOut(query: String, seconds: Double, gone: Bool, covered: Bool)
     case scrollTargetNotFound(query: String, swipes: Int, reachedEnd: Bool)
     case simulatorNotBooted(name: String, udid: String)
+    case invalidEnvironment(String)
 
     public var description: String {
         switch self {
@@ -53,6 +54,8 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
                 + (reachedEnd ? " (the content stopped moving: it's not in this direction; try --direction)." : "; raise --max-swipes or try --direction.")
         case let .simulatorOnly(command):
             return "`ios \(command)` works on simulators only; pass a simulator with --device."
+        case let .invalidEnvironment(assignment):
+            return "--env '\(assignment)' isn't NAME=VALUE."
         case let .simulatorNotBooted(name, udid):
             return "\(name) (\(udid)) isn't booted. Boot it with `ios sim boot --device \(udid)`."
         case let .previewNotFound(name, available, ambiguous):

@@ -37,7 +37,8 @@ public enum Shell {
 
     /// Runs a tool with stdout and stderr written to `log`, for long, verbose tools like
     /// `xcodebuild build`. Returns the exit status; callers parse the log afterwards.
-    public static func run(_ path: String, _ arguments: [String], log: URL, in directory: String? = nil) throws -> Int32 {
+    public static func run(_ path: String, _ arguments: [String], log: URL, in directory: String? = nil,
+                           environment: [String: String] = [:]) throws -> Int32 {
         try FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: log.path, contents: nil)
         let handle = try FileHandle(forWritingTo: log)
@@ -47,6 +48,9 @@ public enum Shell {
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
         if let directory { process.currentDirectoryURL = URL(fileURLWithPath: directory) }
+        if !environment.isEmpty {
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        }
         process.standardOutput = handle
         process.standardError = handle
         try process.run()
