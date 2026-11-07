@@ -23,8 +23,9 @@ public enum Shell {
 
     /// Runs a tool and fails with `IOSError.toolFailed` on a non-zero exit.
     @discardableResult
-    public static func checked(_ path: String, _ arguments: [String], in directory: String? = nil) throws -> CommandResult {
-        let result = try run(path, arguments, in: directory)
+    public static func checked(_ path: String, _ arguments: [String], in directory: String? = nil,
+                               environment: [String: String] = [:]) throws -> CommandResult {
+        let result = try run(path, arguments, in: directory, environment: environment)
         guard result.status == 0 else {
             throw IOSError.toolFailed(
                 command: ([path] + arguments).joined(separator: " "),

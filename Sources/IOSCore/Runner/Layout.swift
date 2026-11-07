@@ -15,7 +15,7 @@ public struct Rect: Codable, Equatable, Sendable {
         return Rect(x: left, y: top, width: max(maxX, other.maxX) - left, height: max(maxY, other.maxY) - top)
     }
 
-    func intersection(_ other: Rect) -> Rect? {
+    public func intersection(_ other: Rect) -> Rect? {
         let left = max(x, other.x), top = max(y, other.y)
         let right = min(maxX, other.maxX), bottom = min(maxY, other.maxY)
         guard right > left, bottom > top else { return nil }

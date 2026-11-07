@@ -11,9 +11,13 @@ struct Run: ParsableCommand {
     @OptionGroup var project: ProjectOptions
     @OptionGroup var target: TargetOptions
     @OptionGroup var signing: SigningOptions
+    @OptionGroup var launchOptions: LaunchOptions
 
     @Flag(help: "Install and launch the last build without building.")
     var noBuild = false
+
+    @Option(help: "Seconds to wait for a locked or asleep device to become available before building.")
+    var waitForDevice: Double = 0
 
     struct Result: Encodable {
         let build: BuildResult?
@@ -23,7 +27,7 @@ struct Run: ParsableCommand {
 
     func run() throws {
         let container = try project.container()
-        let resolved = try TargetResolver.resolve(target.device)
+        let resolved = try TargetResolver.ensureReachable(TargetResolver.resolve(target.device), wait: waitForDevice, progress: Docs.progress)
         let destination = Destination.target(resolved)
         let (listing, _) = try Describer.listing(container)
         let scheme = try Describer.resolveScheme(project.scheme, in: listing)
@@ -48,7 +52,8 @@ struct Run: ParsableCommand {
         let app = try Describer.primaryApp(products, scheme: scheme)
         try Launcher.prepare(resolved)
         try Launcher.install(app.path, on: resolved)
-        let launch = try Launcher.launch(app.bundleIdentifier, on: resolved)
+        let launch = try Launcher.launch(app.bundleIdentifier, on: resolved, arguments: launchOptions.arguments,
+                                         environment: launchOptions.environmentValues())
 
         try Output.emit(Result(build: build, app: app, launch: launch), json: global.json) {
             var lines: [String] = []

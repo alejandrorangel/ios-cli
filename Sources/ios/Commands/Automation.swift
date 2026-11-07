@@ -75,6 +75,9 @@ struct LayoutCommand: ParsableCommand {
     @Option(help: "With --voiceover: maximum number of elements to visit.")
     var max = 200
 
+    @Option(name: .shortAndLong, help: "Write the layout (text, or JSON with --json) to this file instead of printing it.")
+    var output: String?
+
     struct VoiceOverResult: Encodable {
         let spoken: [String]
         /// False when the walk stopped at --max before reaching the last element.
@@ -98,7 +101,7 @@ struct LayoutCommand: ParsableCommand {
             }
             let result = VoiceOverResult(spoken: reply["spoken"] as? [String] ?? [], complete: reply["complete"] as? Bool ?? false,
                                          systemAlert: alert)
-            try Output.emit(result, json: global.json) {
+            try emit(result, json: global.json) {
                 var lines = result.spoken.enumerated().map { index, text in
                     "\(index + 1). \(text)" + (alert?.items.contains(index + 1) == true ? "  (system alert)" : "")
                 }
@@ -114,11 +117,11 @@ struct LayoutCommand: ParsableCommand {
         }
         let tree = try snapshot(automation.session())
         if full {
-            try Output.emit(tree, json: global.json) { treeText(tree) }
+            try emit(tree, json: global.json) { treeText(tree) }
             return
         }
         let elements = Layout.flatten(tree)
-        try Output.emit(elements, json: global.json) {
+        try emit(elements, json: global.json) {
             elements.isEmpty ? "No visible elements (the app may still be loading)." : elements.map(\.textLine).joined(separator: "\n")
         }
     }
@@ -155,9 +158,17 @@ struct LayoutCommand: ParsableCommand {
         }
         let system = try SwiftUITree.systemModules()
         let trees = try SwiftUITree.parse(dumps) { system.contains($0) }
-        try Output.emit(trees, json: global.json) {
+        try emit(trees, json: global.json) {
             trees.map { swiftUIText($0) }.joined(separator: "\n")
         }
+    }
+
+    /// Prints like `Output.emit`, or with --output writes it to that file.
+    private func emit<T: Encodable>(_ value: T, json: Bool, text: () -> String) throws {
+        guard let output else { return try Output.emit(value, json: json, text: text) }
+        let path = URL(fileURLWithPath: output).standardizedFileURL
+        try (Output.render(value, json: json, text: text) + "\n").write(to: path, atomically: true, encoding: .utf8)
+        print("Saved \(path.path)")
     }
 
     private func swiftUIText(_ node: SwiftUIViewNode, depth: Int = 0) -> String {
@@ -181,7 +192,7 @@ struct LayoutCommand: ParsableCommand {
 struct Input: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Tap, swipe, type and press buttons on a simulator or device.",
-        subcommands: [Tap.self, DoubleTap.self, Swipe.self, TypeText.self, Key.self, Button.self, Wait.self, ScrollTo.self]
+        subcommands: [Tap.self, DoubleTap.self, Swipe.self, Drag.self, TypeText.self, Key.self, Button.self, Wait.self, ScrollTo.self]
     )
 
     struct Result: Encodable {
@@ -192,16 +203,27 @@ struct Input: ParsableCommand {
     }
 
     /// Resolves the point to act on from coordinates or an element query.
-    static func point(_ coordinates: [Double], id: String?, label: String?, session: RunnerSession) throws -> (Point, LayoutElement?) {
-        if id != nil || label != nil {
-            let elements = Layout.flatten(try snapshot(session))
-            guard let element = Layout.find(in: elements, id: id, label: label) else {
-                throw IOSError.elementNotFound(query: id.map { "id '\($0)'" } ?? "label '\(label ?? "")'")
-            }
-            return (element.center, element)
-        }
-        guard coordinates.count == 2 else { throw ValidationError("Pass <x> <y>, --id or --label.") }
+    static func point(_ coordinates: [Double], id: String?, label: String?, index: Int? = nil, session: RunnerSession) throws -> (Point, LayoutElement?) {
+        if let element = try element(id: id, label: label, index: index, session: session) { return (element.center, element) }
+        guard coordinates.count == 2 else { throw ValidationError("Pass <x> <y>, --id, --label or --index.") }
         return (Point(x: coordinates[0], y: coordinates[1]), nil)
+    }
+
+    /// The element named by --id, --label or --index (its [N] in `ios layout` and on
+    /// `ios screen capture --annotate`), or nil when none was given.
+    static func element(id: String?, label: String?, index: Int?, session: RunnerSession) throws -> LayoutElement? {
+        guard id != nil || label != nil || index != nil else { return nil }
+        let elements = Layout.flatten(try snapshot(session))
+        if let index {
+            guard let element = elements.first(where: { $0.index == index }) else {
+                throw IOSError.elementNotFound(query: "[\(index)] (the screen has \(elements.count) elements; run `ios layout` again)")
+            }
+            return element
+        }
+        guard let element = Layout.find(in: elements, id: id, label: label) else {
+            throw IOSError.elementNotFound(query: id.map { "id '\($0)'" } ?? "label '\(label ?? "")'")
+        }
+        return element
     }
 
     static func report(_ result: Result, json: Bool) throws {
@@ -220,11 +242,12 @@ struct Input: ParsableCommand {
         @Argument(help: "x y in points (from `ios layout`).") var coordinates: [Double] = []
         @Option(help: "Accessibility identifier of the element to tap.") var id: String?
         @Option(help: "Label of the element to tap (exact, else contains).") var label: String?
+        @Option(help: "Element number [N] from `ios layout` or `ios screen capture --annotate`.") var index: Int?
         @Option(help: "Hold for this many seconds (long press).") var duration: Double?
 
         func run() throws {
             let session = try automation.session()
-            let (point, element) = try Input.point(coordinates, id: id, label: label, session: session)
+            let (point, element) = try Input.point(coordinates, id: id, label: label, index: index, session: session)
             let command = "tap \(point.x) \(point.y)" + (duration.map { " \($0)" } ?? "")
             let reply = try session.send(command)
             try Input.report(Result(action: duration == nil ? "Tapped" : "Long-pressed", point: point, element: element, elapsed: reply.elapsed), json: global.json)
@@ -238,28 +261,49 @@ struct Input: ParsableCommand {
         @Argument(help: "x y in points.") var coordinates: [Double] = []
         @Option(help: "Accessibility identifier.") var id: String?
         @Option(help: "Label (exact, else contains).") var label: String?
+        @Option(help: "Element number [N] from `ios layout` or `ios screen capture --annotate`.") var index: Int?
 
         func run() throws {
             let session = try automation.session()
-            let (point, element) = try Input.point(coordinates, id: id, label: label, session: session)
+            let (point, element) = try Input.point(coordinates, id: id, label: label, index: index, session: session)
             let reply = try session.send("doubletap \(point.x) \(point.y)")
             try Input.report(Result(action: "Double-tapped", point: point, element: element, elapsed: reply.elapsed), json: global.json)
         }
     }
 
     struct Swipe: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Swipe between two points, or across the screen with --direction.")
+        static let configuration = CommandConfiguration(
+            abstract: "Swipe between two points, or across the screen with --direction.",
+            discussion: """
+            With --id, --label or --index the swipe stays inside that element (a carousel, a slider, one \
+            list among several): `ios input swipe --label Photos --direction left`.
+            """
+        )
         @OptionGroup var global: GlobalOptions
         @OptionGroup var automation: AutomationOptions
         @Argument(help: "x1 y1 x2 y2 in points.") var coordinates: [Double] = []
         @Option(help: "up, down, left or right (finger direction; up scrolls content down).") var direction: String?
+        @Option(help: "With --direction: swipe inside the element with this accessibility identifier.") var id: String?
+        @Option(help: "With --direction: swipe inside the element with this label (exact, else contains).") var label: String?
+        @Option(help: "With --direction: swipe inside element [N] from `ios layout`.") var index: Int?
+
+        func validate() throws {
+            if direction == nil, id != nil || label != nil || index != nil {
+                throw ValidationError("--id, --label and --index need --direction.")
+            }
+        }
 
         func run() throws {
             let session = try automation.session()
             let from: Point, to: Point
+            var element: LayoutElement?
             if let direction {
-                let screen = try snapshot(session).frame
-                guard let points = Layout.swipePoints(direction: direction, screen: screen) else {
+                let tree = try snapshot(session)
+                let screen = Layout.screen(of: tree)
+                element = try Input.element(id: id, label: label, index: index, session: session)
+                // Inside an element: its on-screen part, so the swipe starts and ends where it can be touched.
+                let area = element.flatMap { $0.frame.intersection(screen) } ?? screen
+                guard let points = Layout.swipePoints(direction: direction, screen: area, reach: element == nil ? 0.25 : 0.35) else {
                     throw ValidationError("--direction must be up, down, left or right.")
                 }
                 (from, to) = points
@@ -268,7 +312,52 @@ struct Input: ParsableCommand {
                 (from, to) = (Point(x: coordinates[0], y: coordinates[1]), Point(x: coordinates[2], y: coordinates[3]))
             }
             let reply = try session.send("swipe \(from.x) \(from.y) \(to.x) \(to.y)")
-            try Input.report(Result(action: "Swiped (\(Int(from.x)),\(Int(from.y))) →", point: to, element: nil, elapsed: reply.elapsed), json: global.json)
+            try Input.report(Result(action: "Swiped (\(Int(from.x)),\(Int(from.y))) →", point: to, element: element, elapsed: reply.elapsed), json: global.json)
+        }
+    }
+
+    struct Drag: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Press and hold an element (or point), drag it to another element or point, and release.",
+            discussion: """
+            For handles, sliders, reordering and drag-and-drop: \
+            `ios input drag --label "Loop end" --to 120 480`, or `--to-label`/`--to-id`/`--to-index` for an element's centre. \
+            Unlike swipe, it holds before moving (so the element picks up) and at the end (so it doesn't fling).
+            """
+        )
+        @OptionGroup var global: GlobalOptions
+        @OptionGroup var automation: AutomationOptions
+        @Argument(help: "x y to start from, in points (instead of --id/--label/--index).") var coordinates: [Double] = []
+        @Option(help: "Accessibility identifier of the element to drag.") var id: String?
+        @Option(help: "Label of the element to drag (exact, else contains).") var label: String?
+        @Option(help: "Element number [N] to drag, from `ios layout`.") var index: Int?
+        @Option(parsing: .upToNextOption, help: "Point to drop at: x y.") var to: [Double] = []
+        @Option(help: "Drop on the element with this identifier.") var toId: String?
+        @Option(help: "Drop on the element with this label.") var toLabel: String?
+        @Option(help: "Drop on element [N].") var toIndex: Int?
+        @Option(help: "Seconds to hold before moving.") var hold: Double = 0.6
+        @Option(help: "Seconds to hold at the end before releasing.") var endHold: Double = 0.3
+
+        func validate() throws {
+            let targets = (to.isEmpty ? 0 : 1) + (toId == nil ? 0 : 1) + (toLabel == nil ? 0 : 1) + (toIndex == nil ? 0 : 1)
+            guard targets == 1 else { throw ValidationError("Pass one of --to x y, --to-id, --to-label or --to-index.") }
+            if !to.isEmpty, to.count != 2 { throw ValidationError("--to takes x y.") }
+            if hold < 0 || endHold < 0 { throw ValidationError("--hold and --end-hold can't be negative.") }
+        }
+
+        func run() throws {
+            let session = try automation.session()
+            let (from, element) = try Input.point(coordinates, id: id, label: label, index: index, session: session)
+            let destination: Point
+            if to.count == 2 {
+                destination = Point(x: to[0], y: to[1])
+            } else {
+                // Read again: the element to drop on is found on the same screen as the one dragged.
+                destination = try Input.element(id: toId, label: toLabel, index: toIndex, session: session)!.center
+            }
+            let reply = try session.send("swipe \(from.x) \(from.y) \(destination.x) \(destination.y) \(hold) \(endHold)")
+            let action = "Dragged from (\(Int(from.x.rounded())),\(Int(from.y.rounded()))) to (\(Int(destination.x.rounded())),\(Int(destination.y.rounded())))" + (element == nil ? "" : ":")
+            try Input.report(Result(action: action, point: nil, element: element, elapsed: reply.elapsed), json: global.json)
         }
     }
 

@@ -38,6 +38,24 @@ public enum TargetResolver {
         return try defaultSimulator(SimulatorList.load())
     }
 
+    /// Fails early, with what to do, when the target is a paired device that's out of reach (xcodebuild
+    /// would say only "Unable to find a destination"). With `wait`, polls for up to that many seconds.
+    public static func ensureReachable(_ target: Target, wait: Double = 0, progress: (String) -> Void = { _ in }) throws -> Target {
+        guard case let .device(device) = target, device.isUnavailable else { return target }
+        let deadline = Date().addingTimeInterval(wait)
+        if wait > 0 { progress("\(device.name) is \(device.displayState); waiting up to \(Int(wait)) s for it…") }
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: 2)
+            if let fresh = try DeviceList.load().first(where: { $0.udid == device.udid }), !fresh.isUnavailable {
+                return .device(fresh)
+            }
+        }
+        throw IOSError.failed("""
+            \(device.name) is paired but \(device.displayState). Unlock it and keep it awake, connected by cable or on the \
+            same network as this Mac, then retry\(wait > 0 ? "" : " (or pass --wait-for-device SECONDS)").
+            """)
+    }
+
     public static func defaultSimulator(_ simulators: [Simulator]) throws -> Target {
         let booted = simulators.filter(\.isBooted)
         if booted.count == 1 { return .simulator(booted[0]) }

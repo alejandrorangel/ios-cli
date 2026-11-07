@@ -35,18 +35,24 @@ public enum Launcher {
     }
 
     /// Launches (restarting it if running) and returns the new process ID when the tool reports it.
-    public static func launch(_ bundleIdentifier: String, on target: Target) throws -> LaunchResult {
+    /// `arguments` reach the app's CommandLine/ProcessInfo (and UserDefaults: "-Flag YES" sets the
+    /// Flag default for this launch); `environment` its ProcessInfo environment.
+    public static func launch(_ bundleIdentifier: String, on target: Target, arguments: [String] = [],
+                              environment: [String: String] = [:]) throws -> LaunchResult {
         switch target {
         case let .simulator(s):
+            // simctl passes SIMCTL_CHILD_NAME to the app as NAME.
             let out = try Shell.checked("/usr/bin/xcrun", [
                 "simctl", "launch", "--terminate-running-process", s.udid, bundleIdentifier,
-            ]).stdoutString
+            ] + arguments, environment: Dictionary(uniqueKeysWithValues: environment.map { ("SIMCTL_CHILD_" + $0.key, $0.value) })).stdoutString
             return LaunchResult(bundleIdentifier: bundleIdentifier, pid: parseSimctlPid(out), udid: s.udid)
         case let .device(d):
-            let out = try Shell.checked("/usr/bin/xcrun", [
-                "devicectl", "device", "process", "launch", "--device", d.udid,
-                "--terminate-existing", bundleIdentifier, "-j", "-",
-            ]).stdout
+            var options = ["devicectl", "device", "process", "launch", "--device", d.udid, "--terminate-existing", "-j", "-"]
+            if !environment.isEmpty {
+                let json = try JSONSerialization.data(withJSONObject: environment, options: [.sortedKeys])
+                options += ["--environment-variables", String(decoding: json, as: UTF8.self)]
+            }
+            let out = try Shell.checked("/usr/bin/xcrun", options + [bundleIdentifier] + arguments).stdout
             return LaunchResult(bundleIdentifier: bundleIdentifier, pid: parseDevicectlPid(out), udid: d.udid)
         }
     }

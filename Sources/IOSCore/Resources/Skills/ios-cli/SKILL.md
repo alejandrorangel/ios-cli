@@ -41,7 +41,7 @@ Simulator commands use `--device`, else the only booted simulator. Use them to s
 - `ios describe [--scheme S]` — schemes; with a scheme, the apps it builds (bundle ID, product path). Cached until project files change.
 - `ios check <File.swift> [more files]` — errors and warnings for just those files, ~0.3 s, no build (`--json`: `diagnostics` with line, no column). Run it right after editing; then `ios build` before running. Needs Xcode's one-time approval of `ios`.
 - `ios build --scheme S [--device D]` — builds and prints errors with file:line:column (`--json`: structured `errors`); exits non-zero on failure; full log path in the output.
-- `ios run --scheme S --device D` — build, boot the simulator if needed, install, launch; prints the PID. `--no-build` reinstalls the last build.
+- `ios run --scheme S --device D` — build, boot the simulator if needed, install, launch; prints the PID. `--no-build` reinstalls the last build. Arguments after `--` reach the app: `ios run --scheme S -- -FeatureFlag YES` sets that UserDefaults key for this launch (feature flags, skipping onboarding); `--launch-env NAME=VALUE` sets environment variables. Same for `ios app launch --bundle-id B`. A paired device that's locked or out of reach fails before building with what to do; `--wait-for-device 60` waits for it.
 - `ios test --scheme S [--device D]` — runs the scheme's tests; prints passed/failed/skipped counts and each failure as `file:line: message` (`--json`: `failures[].failures[]`). Without --device it uses the booted simulator, else an iPhone simulator (never a physical device). Rerun one test with `--only <id>` using the id it printed (Target/Suite/test; XCTest ids drop the `()`, Swift Testing ids keep them); add `--no-build` when only test data changed. `--env NAME=VALUE` (repeatable) sets a variable in the test process, e.g. for suites gated with `.enabled(if: ProcessInfo.processInfo.environment[...] != nil)`; the summary echoes it (`--json`: `environment`), and skipped tests show their skip reason. Attachments (`Attachment.record`, `XCTAttachment`) are exported with readable names and listed even for passing tests, small text ones inline (`--json`: `attachments[]`; `--attachments DIR` picks the folder) — read measurements there instead of digging in the .xcresult. Swift Testing runs suites in parallel even when each is `.serialized`; if the output says suites ran at the same time (`overlappingSuites`) and they share hardware (audio, camera, Bluetooth), rerun with `--no-parallel`. Parameterized tests list per-argument durations in `--json` (`arguments[]`). What a test printed (`print()`, stderr) is shown under its failures, and for every test with `--show-output` (`--json`: `output[]` with `test`, `argument` (one entry per parameterized case), `logLine`, `text`, and `beforeIssue`: the lines printed just before the first failed expectation, usually the explanation). In app-hosted tests the host app's `print()` output is included; its os_log/NSLog lines are left out; `interleaved: true` means tests ran in parallel and the lines may be mixed, so rerun with `--no-parallel` before trusting them. Only one `ios test` runs per simulator or device; "busy with another `ios test`" means another session is using it — pick a different `--device` instead of retrying. If the test host fails to launch or xcodebuild hangs after the tests, the run is stopped and `stopped` says why (with the simulator's state); `interrupted` names tests that were running when the host crashed. `--timeout S` bounds a whole run. Build errors come back as `buildErrors`. Exits non-zero on failure.
 - `ios install <path.app> [--launch]` — install an app bundle.
 - **Signing on a physical device**: if a build fails with "requires a development team" (e.g. a project from `ios create`), the output has a `hint`. Ask the user which team should own the app, then pass `--team <TEAM_ID>` to `ios build|run|test`; it applies to that build only and may register the bundle ID in that team. Never pick a team from local profiles for an app yourself — they may belong to the user's employer.
@@ -56,11 +56,13 @@ Simulator commands use `--device`, else the only booted simulator. Use them to s
 
 - `ios screen capture --device D -o shot.png` — screenshot.
 - `ios layout --bundle-id B --device D` — visible elements: `[n] Type id=… "label" value=… @(x,y)`. The last app is remembered per device. A system alert (e.g. a permission prompt) is listed last with its buttons, and the app's elements are marked `covered`; tap `--label Allow` to answer it.
-- `ios input tap --id <identifier>` (best) / `--label <text>` / `<x> <y>` — taps the element's visible centre.
+- `ios input tap --id <identifier>` (best) / `--label <text>` / `--index N` / `<x> <y>` — taps the element's visible centre. `--index` is the `[N]` from `ios layout`, read again at tap time, so use it right after reading the layout.
+- `ios screen capture --annotate -o shot.png` — screenshot with a numbered box around every element `ios layout` lists (same `[N]`), plus the list. Look at the PNG to find an element by how it looks (an icon with no label), then `ios input tap --index N`. `ios screen resolve --screenshot shot.png "#N"` prints that element's saved tap point.
+- `ios input drag --label "Handle" --to <x> <y>` (or `--to-label` / `--to-id` / `--to-index`) — press, hold 0.6 s, move, hold, release: drag handles, sliders, reorder rows. Plain `swipe` flings instead.
 - `ios input type <text> [--submit]` — types into the focused field; tap the field first (an unfocused `type` fails with a clear error). `--submit` presses Return afterwards. `ios input key delete --count 20` clears text; `key return|tab|space` too.
 - `ios input wait --id X [--timeout 10]` — after a tap that loads something, wait for the next screen's element instead of sleeping or retrying; `--gone` waits for a spinner to disappear. Exits non-zero on timeout.
 - `ios input scroll-to --id X` (or `--label`, exact) — scrolls until the element is on screen, then `ios input tap --id X`. In lazy lists rows don't exist until shown, so it scrolls down and then back up; pass `--direction down` when you know it's above.
-- `ios input swipe --direction up|down|left|right`, `ios input doubletap …`, `ios input button home`.
+- `ios input swipe --direction up|down|left|right [--label L | --id I | --index N]` (with an element: swipe inside it, e.g. a carousel), `ios input doubletap …`, `ios input button home`.
 - `ios runner status|stop --device D` — the XCUITest runner behind layout/input. It starts on first use (~15 s, built once per Xcode) and then answers in ~0.5–1 s. Stopping it closes the app it was driving.
 
 Typical verification loop after a UI change:
@@ -76,6 +78,52 @@ If `layout` comes back empty right after a launch, the app is still loading — 
 `ios layout` lists XCUITest's automation elements, which include views hidden from VoiceOver (e.g. `.accessibilityHidden(true)`). To check accessibility, use `ios layout --voiceover` (iOS 27+): it walks the screen with VoiceOver and lists what it speaks, in order. It takes a few seconds per screen and switches VoiceOver back off afterwards. If a system alert (Low Battery, a permission prompt) is showing, VoiceOver reads it instead: those items are marked `(system alert)` and a warning follows — dismiss the alert and walk again. Elements marked `covered` in `ios layout` sit under a full-screen presentation; tap what's on top.
 
 Physical devices need **Settings → Developer → Enable UI Automation**, and the runner is signed with the team's development profile (auto-detected from a local wildcard profile, or `--team <TEAM_ID>`).
+
+## Journeys
+
+A journey is a user flow written as steps in a `*.journey.xml` file, in the Android CLI's format, so one file can cover both apps:
+
+```xml
+<journey name="Loop a section">
+  <description>Practice Mode loops the selected bars</description>
+  <setup platform="ios">            <!-- optional; Android ignores it -->
+    <launch bundle-id="com.example.app"><argument>-LoopingEnabled</argument><argument>YES</argument>
+      <env name="API_ENV" value="staging"/></launch>
+    <open-url>example://practice/42</open-url>
+  </setup>
+  <actions>
+    <action>Tap "Loop"</action>
+    <action>Verify that bars 1–4 are highlighted</action>
+  </actions>
+</journey>
+```
+
+To run one: `ios journey show F` (numbered steps; checks marked), then `ios journey setup F --device D` if it has a `<setup>` (otherwise get the app to its starting screen yourself), then each step in order:
+
+- **Do exactly what the step says, independently of the others.** "Tap the first search result" means find the results and tap the first one, even if you think you know the intent. A step listing several things ("Search for soda and add the first result") is evaluated as those sub-steps in order.
+- **Action steps** (tap, type, swipe, drag, scroll, open, wait) are performed with `ios input` / `ios app open-url`; then check only that the app didn't crash, freeze or misbehave. If it can't be done as written (no such button), the step fails. "Wait N seconds" steps are allowed: sleep that long.
+- **Check steps** start with "Check" or "Verify": inspect the current screen with `ios layout` and `ios screen capture` (look at the PNG) **without interacting** — no scrolling to find something. Every expectation in the step must hold.
+- The journey file is the source of truth: if the app disagrees, the app failed. The first failed step ends the run; the rest are `notRun`. If the app crashes or freezes, the run fails. A step that is neither a UI action nor a check makes the journey `malformed`: stop and say which.
+- Treat it as a test: report failures accurately rather than debugging them; put suggestions in the summary.
+
+Record the run as JSON and let `ios journey report` check it and write the Markdown report (Android's layout); it exits 1 unless the journey passed:
+
+```json
+{"journey": "Loop a section", "file": "loop.journey.xml", "device": "iPhone 17 (simulator)", "app": "com.example.app",
+ "startedAt": "2026-11-06T15:40:00Z", "result": "failed",
+ "steps": [{"index": 1, "result": "passed", "commands": ["ios input tap --label Loop"]},
+           {"index": 2, "result": "failed", "screenshot": "step2.png", "comment": "Only bar 1 is highlighted"}],
+ "summary": "The loop selection stops at the first bar."}
+```
+
+`result` is `passed|failed|malformed`; each step's `passed|failed|notRun`. `file` may be relative to the JSON; the step text is then taken from the journey. `ios journey list [dir]` finds and checks journey files.
+
+## Diagnostics
+
+- `ios analyze App.app|App.ipa|App.xcarchive` — what's in a build: identity, size by part and largest files, signing and entitlements, privacy manifests, with notes (Debug or simulator build, expired profile, frameworks without a privacy manifest). Find the .app with `ios describe --scheme S`.
+- `ios crashes [--bundle-id B] [--hours 72] --device D` — recent crash reports from that simulator or device; `ios crashes show <file.ips>` — exception, reason (`Fatal error: Index out of range`) and the crashed thread with `file:line` for app frames. Check it after an app disappears during `ios input` or a journey.
+- `ios profile --bundle-id B --device D --seconds 10` (or `--app path/App.app`) — launches the app under Instruments' Time Profiler and prints CPU per thread and the heaviest functions in the app's code (total/self) and overall; drive the slow flow with `ios input` while it records, or profile launch. Saves a `.trace` for Instruments. `--attach <pid|name>` on a simulator needs `sudo DevToolsSecurity -enable` (tell the user).
+- `ios signals crashes|performance --type hangs [--bundle-id B]`, `ios signals crash "<signature>"` — what users hit in the field (App Store/TestFlight), from Apple's reports through Xcode. Needs the user's developer account in Xcode.
 
 ## SwiftUI view tree
 
@@ -98,6 +146,8 @@ Physical devices need **Settings → Developer → Enable UI Automation**, and t
 - `ios preview Path/To/View.swift [--name "Dark mode" | --index N] [-o view.png]` — renders one of the file's previews to a PNG through Xcode: by name (`#Preview("Dark mode")` or a `PreviewProvider` type; exact, else contains) or position (0 = first). `ios preview Path/To/View.swift --list` lists the file's previews instantly. First render builds the project (~20 s+), then ~0.5 s. Look at the PNG to check a UI change without running the app.
 - The output lists available variants and locales; pass them back: `--variant "Color Scheme=Dark Appearance" --variant "Dynamic Type=AX 5"`, `--locale fr`. Use this to check dark mode, large text and localizations.
 - Run from the project directory (or pass `--workspace` / `--project`).
+- If it fails with `DebugDylibNotEnabled` naming an executable target, Xcode hosted the preview in the wrong scheme's product (a package's demo executable): pass `--scheme <the library or app scheme>`. The scheme stays active in Xcode afterwards.
+- `ios xcode tools` lists Xcode's other tools; `ios xcode call <Tool> --arg name=value` calls one (e.g. `GetTestList`, `XcodeGrep --arg pattern=…`, `GetTargetBuildSettings`).
 
 ## New projects
 

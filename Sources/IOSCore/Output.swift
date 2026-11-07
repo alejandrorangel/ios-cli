@@ -4,13 +4,15 @@ public enum Output {
     /// Prints `value` as JSON when `json` is set, otherwise the human-readable text.
     /// Agents should pass `--json`; the text form is for people and may change.
     public static func emit<T: Encodable>(_ value: T, json: Bool, text: () -> String) throws {
-        if json {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-            print(String(decoding: try encoder.encode(value), as: UTF8.self))
-        } else {
-            print(text())
-        }
+        print(try render(value, json: json, text: text))
+    }
+
+    /// What `emit` prints, as a string (to write to a file instead).
+    public static func render<T: Encodable>(_ value: T, json: Bool, text: () -> String) throws -> String {
+        guard json else { return text() }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
 
     /// Left-aligned columns for text tables.
