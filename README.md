@@ -163,6 +163,8 @@ swift run ios sim list --booted --json
 swift test
 ```
 
+`ios check`, `preview` and `create` go through Xcode's tool service, which asks you to approve `ios`. An unsigned build is approved for 24 hours at most and asks again after every rebuild; a signed one is approved once. To sign what `scripts/install.sh` installs, set `IOS_CLI_SIGN_IDENTITY` to a code-signing certificate's SHA-1 or name (`security find-identity -v -p codesigning`), e.g. in your shell profile. Xcode also approves each project folder; approving a parent folder durably covers the projects in it.
+
 ## Layout
 
 | Path | Contents |
