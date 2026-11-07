@@ -15,7 +15,10 @@ struct TestCommand: ParsableCommand {
         Swift Testing runs suites in parallel even when each is .serialized; the output names suites that \
         overlapped, and --no-parallel runs one at a time (for tests sharing audio, the camera…). What a test \
         prints is shown under its failures (--show-output: for every test); when tests ran in parallel their \
-        lines may be mixed, and the output says so. The full log and the .xcresult bundle \
+        lines may be mixed, and the output says so. Only one `ios test` runs on a simulator or device at a \
+        time; a second is refused. If the test host fails to launch (the simulator died) and no test starts \
+        within 60 seconds, the run is stopped and the reason reported; --timeout bounds the whole run. \
+        The full log and the .xcresult bundle \
         (open it in Xcode for attachments and screenshots) are written to files whose paths are in the \
         output. Exits non-zero when a test fails or the tests don't build.
         """
@@ -56,6 +59,9 @@ struct TestCommand: ParsableCommand {
     @Flag(help: "Show what every test printed, not only failed tests.")
     var showOutput = false
 
+    @Option(help: ArgumentHelp("Stop the run after this many seconds.", valueName: "seconds"))
+    var timeout: Double?
+
     func run() throws {
         let environment = try TestRequest.parseEnvironment(environment)
         let container = try project.container()
@@ -68,7 +74,7 @@ struct TestCommand: ParsableCommand {
             container: container, scheme: scheme, configuration: project.configuration,
             destination: .target(resolved), derivedDataPath: project.derivedDataPath,
             only: only, skip: skip, testPlan: testPlan, withoutBuilding: noBuild, retries: retries, team: signing.team,
-            environment: environment, serial: noParallel, attachmentsDirectory: attachments
+            environment: environment, serial: noParallel, attachmentsDirectory: attachments, timeout: timeout
         ))
         try Output.emit(result, json: global.json) { result.textSummary(allOutput: showOutput) }
         if !result.succeeded { throw ExitCode.failure }
@@ -78,7 +84,9 @@ struct TestCommand: ParsableCommand {
 extension TestResult {
     func textSummary(allOutput: Bool = false) -> String {
         var lines: [String] = []
-        if !buildErrors.isEmpty {
+        if let stopped, buildErrors.isEmpty, passed + failed + skipped + expectedFailures == 0 {
+            lines.append("✗ Run stopped after \(duration)s, before any results were saved")
+        } else if !buildErrors.isEmpty {
             lines.append("✗ Tests didn't build in \(duration)s (\(buildErrors.count) errors)")
             lines += buildErrors.prefix(15).map { "  \($0.summary)" }
         } else if passed + failed + skipped + expectedFailures == 0 {
@@ -100,6 +108,11 @@ extension TestResult {
             for test in skippedTests.prefix(10) {
                 lines.append("  – \(test.id) skipped" + (test.skipReason.map { ": \($0)" } ?? ""))
             }
+        }
+        if let stopped { lines.append("  ✗ \(stopped)") }
+        if !interrupted.isEmpty {
+            lines.append("  ✗ The test host exited while \(interrupted.joined(separator: ", ")) ran (a crash, or the "
+                         + "simulator or device stopped); xcodebuild relaunched it without \(interrupted.count == 1 ? "that test" : "them").")
         }
         if !overlappingSuites.isEmpty {
             lines.append("  ! Suites ran at the same time: \(overlappingSuites.joined(separator: ", ")). "

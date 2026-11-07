@@ -153,8 +153,9 @@ private let tree = #"""
     #expect(TestRunner.swiftTestingEvent(#"✘ Test f(speed:) recorded an issue with 1 argument speed → .full at X.swift:89:9: Expectation failed: a"#)
             == .issue("f(speed:)"))
     #expect(TestRunner.swiftTestingEvent(#"➜ Test "Pretty name" skipped: "not ready""#) == .testEnded("Pretty name"))
-    #expect(TestRunner.swiftTestingEvent("✘ Test run with 2 tests in 2 suites failed after 0.005 seconds.") == nil)
-    #expect(TestRunner.swiftTestingEvent("◇ Test run started.") == nil)
+    #expect(TestRunner.swiftTestingEvent("✘ Test run with 2 tests in 2 suites failed after 0.005 seconds.") == .runEnded)
+    #expect(TestRunner.swiftTestingEvent("✔ Test run with 1 test in 1 suite passed after 0.001 seconds.") == .runEnded)
+    #expect(TestRunner.swiftTestingEvent("◇ Test run started.") == .runStarted)
     #expect(TestRunner.swiftTestingEvent("↳ onsets stopped alternating click/blip") == nil)
 }
 
@@ -293,4 +294,99 @@ private let tree = #"""
     let diagnostics = Builder.parseDiagnostics(log)
     #expect(diagnostics.map(\.file) == ["/src/App.xcodeproj"])
     #expect(diagnostics.first?.summary.hasPrefix("/src/App.xcodeproj: error: Signing for") == true)
+}
+
+// The log of a run whose simulator died while launching the test host (iOS 27, Xcode 27).
+private let launchFailure = """
+2026-10-28 13:11:33.402 xcodebuild[51234:887766] [MT] IDELaunchReport: 7E0C…: Launching Play-DevTests Finished with error: The operation couldn’t be completed. (Mach error -308 - (ipc/mig) server died)
+
+"""
+
+@Test func stopsARunWhoseTestHostFailedToLaunch() {
+    let start = Date(timeIntervalSince1970: 0)
+    var watchdog = TestWatchdog(start: start, timeout: nil, grace: 60)
+    #expect(watchdog.observe("Testing started\n", now: start.addingTimeInterval(5)) == nil)
+    // The error line arrives split across two reads.
+    let cut = launchFailure.index(launchFailure.startIndex, offsetBy: 60)
+    #expect(watchdog.observe(String(launchFailure[..<cut]), now: start.addingTimeInterval(10)) == nil)
+    #expect(watchdog.observe(String(launchFailure[cut...]), now: start.addingTimeInterval(11)) == nil)
+    #expect(watchdog.launchError?.message == "The operation couldn’t be completed. (Mach error -308 - (ipc/mig) server died)")
+    #expect(watchdog.observe("", now: start.addingTimeInterval(70)) == nil)
+    let reason = watchdog.observe("", now: start.addingTimeInterval(72))
+    #expect(reason?.hasPrefix("The test host failed to launch: The operation couldn’t be completed. (Mach error -308") == true)
+    #expect(reason?.hasSuffix("Stopped xcodebuild after 60s without a test starting.") == true)
+}
+
+@Test func keepsARunThatRecoversFromALaunchError() {
+    let start = Date(timeIntervalSince1970: 0)
+    var watchdog = TestWatchdog(start: start, timeout: nil, grace: 60)
+    _ = watchdog.observe(launchFailure, now: start)
+    #expect(watchdog.observe("\u{200B}◇ Test drift(speed:) started.\n", now: start.addingTimeInterval(30)) == nil)
+    #expect(watchdog.launchError == nil)
+    #expect(watchdog.observe("", now: start.addingTimeInterval(500)) == nil)
+}
+
+@Test func stopsARunAtItsTimeout() {
+    let start = Date(timeIntervalSince1970: 0)
+    var watchdog = TestWatchdog(start: start, timeout: 120)
+    #expect(watchdog.observe("Test Case '-[T.C testA]' started.\n", now: start.addingTimeInterval(119)) == nil)
+    #expect(watchdog.observe("", now: start.addingTimeInterval(121)) == "Stopped xcodebuild after 120s (--timeout).")
+}
+
+@Test func refusesASecondRunOnTheSameDestination() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ios-cli-locks-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let simulator = Simulator(udid: "FAEF2067", name: "iPhone 17", state: "Booted", runtime: "iOS", osVersion: "27.0", deviceType: nil)
+    let destination = Destination.target(.simulator(simulator))
+    let lock = try #require(try DestinationLock.acquire(destination, directory: directory))
+    #expect(throws: IOSError.destinationBusy(label: Target.simulator(simulator).label, pid: getpid())) {
+        try DestinationLock.acquire(destination, directory: directory)
+    }
+    lock.release()
+    try #require(try DestinationLock.acquire(destination, directory: directory))?.release()
+    #expect(try DestinationLock.acquire(.genericSimulator, directory: directory) == nil)
+}
+
+// A run whose simulator was shut down while SuiteA/a1() ran: xcodebuild relaunched the test host,
+// which ran nothing, and then never exited (iOS 27 simulator, Xcode 27).
+private let relaunched = """
+◇ Test run started.
+↳ Testing Library Version: 2084
+◇ Suite SuiteA started.
+◇ Test a1() started.
+STAMP A start 0.00
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-10-28 13:27:18.467.
+◇ Test run started.
+↳ Testing Library Version: 2084
+◇ Suite SuiteA started.
+✔ Suite SuiteA passed after 0.001 seconds.
+✔ Test run with 0 tests in 1 suite passed after 0.001 seconds.
+
+"""
+
+@Test func namesTheTestThatWasRunningWhenTheHostExited() {
+    #expect(TestRunner.interruptedTests(relaunched) == ["SuiteA/a1()"])
+    #expect(TestRunner.overlappingSuites(relaunched, ancestors: [:]).isEmpty)
+    #expect(TestRunner.interruptedTests("◇ Test run started.\n◇ Test a() started.\n✔ Test a() passed after 1 seconds.\n").isEmpty)
+    let output = TestRunner.testOutput(relaunched, tests: ["SuiteA": ["a1()": "T/SuiteA/a1()"]])
+    #expect(output.map(\.test) == ["T/SuiteA/a1()"])
+    #expect(output.allSatisfy { !$0.interleaved })
+}
+
+@Test func stopsXcodebuildThatDoesNotExitAfterTheTests() {
+    let start = Date(timeIntervalSince1970: 0)
+    var watchdog = TestWatchdog(start: start, timeout: nil, exitGrace: 120)
+    #expect(watchdog.observe(relaunched, now: start.addingTimeInterval(150)) == nil)
+    #expect(watchdog.observe("", now: start.addingTimeInterval(200)) == nil)
+    #expect(watchdog.observe("", now: start.addingTimeInterval(271)) == "xcodebuild didn't exit 120s after the tests finished; stopped it.")
+    #expect(watchdog.stoppedForHang)
+
+    // Another test bundle launching after the first one's run keeps the run alive.
+    var multiple = TestWatchdog(start: start, timeout: nil, exitGrace: 120)
+    _ = multiple.observe("✔ Test run with 3 tests in 1 suite passed after 1 seconds.\n", now: start)
+    #expect(multiple.observe("Test Suite 'Selected tests' started at 2026-10-28 13:27:18.467.\n", now: start.addingTimeInterval(30)) == nil)
+    #expect(multiple.observe("", now: start.addingTimeInterval(400)) == nil)
 }

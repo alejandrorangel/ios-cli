@@ -21,11 +21,13 @@ public struct TestRequest: Sendable {
     public let serial: Bool
     /// Where to export attachments; nil puts them next to the result bundle.
     public let attachmentsDirectory: String?
+    /// Stop xcodebuild after this many seconds.
+    public let timeout: Double?
 
     public init(container: Container, scheme: String, configuration: String?, destination: Destination,
                 derivedDataPath: String?, only: [String], skip: [String], testPlan: String?,
                 withoutBuilding: Bool, retries: Int?, team: String? = nil, environment: [String: String] = [:],
-                serial: Bool = false, attachmentsDirectory: String? = nil) {
+                serial: Bool = false, attachmentsDirectory: String? = nil, timeout: Double? = nil) {
         self.container = container
         self.scheme = scheme
         self.configuration = configuration
@@ -40,6 +42,7 @@ public struct TestRequest: Sendable {
         self.environment = environment
         self.serial = serial
         self.attachmentsDirectory = attachmentsDirectory
+        self.timeout = timeout
     }
 
     /// xcodebuild passes `TEST_RUNNER_<NAME>` from its own environment to the test process as `<NAME>`.
@@ -161,8 +164,114 @@ public struct TestResult: Codable, Sendable {
     public let attachments: [TestAttachment]
     /// Swift Testing suites (not nested in one another) that ran at the same time.
     public let overlappingSuites: [String]
+    /// Why ios stopped xcodebuild (the test host failed to launch, or --timeout); results may be partial.
+    public let stopped: String?
+    /// Tests that were running when the test host exited (a crash, or the simulator/device stopped);
+    /// xcodebuild relaunches it and carries on without them.
+    public let interrupted: [String]
     /// What each test printed, read from the log.
     public let output: [TestOutput]
+}
+
+/// Decides when to stop a test run that won't finish on its own: the test host failed to launch
+/// (the simulator died) and no test started within `grace`, or the run passed `timeout`.
+public struct TestWatchdog {
+    let start: Date
+    let timeout: Double?
+    let grace: Double
+    /// How long xcodebuild may stay silent after a test run ended before it counts as hung.
+    let exitGrace: Double
+    /// The launch failure xcodebuild reported and when, until a test starts.
+    private(set) var launchError: (message: String, at: Date)?
+    /// When the last test run ended, until something else is logged.
+    private var runEndedAt: Date?
+    private var partial = ""
+
+    public init(start: Date, timeout: Double?, grace: Double = 60, exitGrace: Double = 120) {
+        self.start = start
+        self.timeout = timeout
+        self.grace = grace
+        self.exitGrace = exitGrace
+    }
+
+    /// The watchdog stopped the run because xcodebuild or the test host stopped responding (not --timeout).
+    public var stoppedForHang: Bool { launchError != nil || runEndedAt != nil }
+
+    /// Feeds new log text; returns why the run should be stopped, if it should.
+    public mutating func observe(_ text: String, now: Date) -> String? {
+        let lines = (partial + text).split(separator: "\n", omittingEmptySubsequences: false)
+        partial = String(lines.last ?? "")
+        if !text.isEmpty { runEndedAt = nil }
+        for line in lines.dropLast() {
+            if case .runEnded = TestRunner.swiftTestingEvent(line) { runEndedAt = now; continue }
+            if line.contains("IDELaunchReport") && line.contains("Finished with error") || line.contains("(ipc/mig) server died") {
+                if launchError == nil { launchError = (Self.launchMessage(line), now) }
+            } else if Self.startsTest(line) {
+                launchError = nil
+            }
+        }
+        if let launchError, now.timeIntervalSince(launchError.at) >= grace {
+            return "The test host failed to launch: \(launchError.message). Stopped xcodebuild after "
+                + "\(Int(grace))s without a test starting."
+        }
+        if let runEndedAt, now.timeIntervalSince(runEndedAt) >= exitGrace {
+            return "xcodebuild didn't exit \(Int(exitGrace))s after the tests finished; stopped it."
+        }
+        if let timeout, now.timeIntervalSince(start) >= timeout {
+            return "Stopped xcodebuild after \(Int(timeout))s (--timeout)."
+        }
+        return nil
+    }
+
+    static func startsTest(_ line: Substring) -> Bool {
+        if line.hasPrefix("Test Case '") && line.hasSuffix("' started.") { return true }
+        switch TestRunner.swiftTestingEvent(line) {
+        case .testStarted, .caseStarted, .runStarted: return true
+        default: return false
+        }
+    }
+
+    /// "… IDELaunchReport: … Launching X Finished with error: The operation couldn’t be completed. (Mach error -308 …)"
+    /// → the text after "Finished with error:".
+    static func launchMessage(_ line: Substring) -> String {
+        let message = line.range(of: "Finished with error:").map { line[$0.upperBound...] } ?? line
+        return message.trimmingCharacters(in: .whitespaces)
+    }
+}
+
+/// An exclusive lock on a simulator or device for one `ios test` at a time, through `flock`
+/// on a file per UDID; the OS releases it if the process dies.
+public final class DestinationLock {
+    private let descriptor: Int32
+
+    private init(descriptor: Int32) { self.descriptor = descriptor }
+
+    public static var directory: URL { Builder.defaultLogDirectory.deletingLastPathComponent().appendingPathComponent("locks") }
+
+    /// nil for generic destinations; throws `destinationBusy` when another process holds the lock.
+    public static func acquire(_ destination: Destination, directory: URL = directory) throws -> DestinationLock? {
+        guard case let .target(target) = destination else { return nil }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent("\(target.udid).lock").path
+        let descriptor = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+        guard descriptor >= 0 else { return nil }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let pid = (try? String(contentsOfFile: path, encoding: .utf8)).flatMap {
+                Int32($0.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            close(descriptor)
+            throw IOSError.destinationBusy(label: target.label, pid: pid)
+        }
+        ftruncate(descriptor, 0)
+        let pid = "\(getpid())\n"
+        _ = pid.withCString { write(descriptor, $0, strlen($0)) }
+        return DestinationLock(descriptor: descriptor)
+    }
+
+    public func release() {
+        flock(descriptor, LOCK_UN)
+        close(descriptor)
+    }
 }
 
 public enum TestRunner {
@@ -173,10 +282,18 @@ public enum TestRunner {
         let suffix = UUID().uuidString.prefix(6).lowercased()
         let log = logDirectory.appendingPathComponent("test-\(stamp)-\(suffix).log")
         let bundle = logDirectory.appendingPathComponent("test-\(stamp)-\(suffix).xcresult")
+        // Two runs on one simulator can kill each other's test host; the lock is released when this process exits.
+        let lock = try DestinationLock.acquire(request.destination)
+        defer { lock?.release() }
         let start = Date()
+        var watchdog = TestWatchdog(start: start, timeout: request.timeout)
+        var stopped: String?
         let status = try Shell.run("/usr/bin/xcrun", request.xcodebuildArguments(resultBundle: bundle.path),
                                    log: log, in: request.container.workingDirectory,
-                                   environment: request.xcodebuildEnvironment)
+                                   environment: request.xcodebuildEnvironment) { text in
+            stopped = watchdog.observe(text, now: Date())
+            return stopped
+        }
         let duration = (Date().timeIntervalSince(start) * 10).rounded() / 10
         let logText = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
 
@@ -197,13 +314,22 @@ public enum TestRunner {
         }
 
         let count = { (result: String) in cases.filter { $0.result == result }.count }
-        let buildErrors = cases.isEmpty ? Builder.parseDiagnostics(logText).filter { $0.severity == "error" } : []
+        // XCTest's failures ("file:3: error: -[T.C testA] : XCTAssertEqual failed…") look like compiler errors.
+        let buildErrors = cases.isEmpty
+            ? Builder.parseDiagnostics(logText).filter { $0.severity == "error" && !$0.message.hasPrefix("-[") } : []
         var issues: [String] = []
         if status != 0 && cases.isEmpty && buildErrors.isEmpty {
             issues = logIssues(logText)
             if issues.isEmpty { issues = ["xcodebuild exited with status \(status) without running any tests; see the log."] }
         } else if status == 0 && cases.isEmpty {
             issues = ["No tests ran. Check the scheme's test action, the test plan, or the --only identifiers."]
+        }
+        if stopped != nil {
+            issues = []
+            if watchdog.stoppedForHang, case let .target(.simulator(simulator)) = request.destination {
+                let state = (try? SimulatorList.load())?.first { $0.udid == simulator.udid }?.state
+                stopped! += " Simulator \(simulator.name) is now \(state ?? "no longer available")."
+            }
         }
         return TestResult(
             succeeded: status == 0 && !cases.isEmpty,
@@ -222,6 +348,8 @@ public enum TestRunner {
             environment: request.environment,
             attachments: attachments,
             overlappingSuites: overlappingSuites(logText, ancestors: index.ancestors),
+            stopped: stopped,
+            interrupted: interruptedTests(logText),
             output: testOutput(logText, tests: index.tests)
         )
     }
@@ -307,14 +435,18 @@ public enum TestRunner {
         /// One argument case of a parameterized test: the test's name and its arguments ("speed → .full").
         case caseStarted(test: String, arguments: String)
         case issue(String)
+        /// "◇ Test run started." / "✔ Test run with 3 tests in 2 suites passed…": one launch of a test bundle.
+        case runStarted, runEnded
     }
 
     private static let name = #"("(?:[^"\\]|\\.)*"|[^ ]+)"#
     nonisolated(unsafe) private static let eventPatterns: [(NSRegularExpression, ([String]) -> Event?)] = [
+        (#"^Test run started\.$"#, { _ in .runStarted }),
+        (#"^Test run with \d+ tests? .*(?:passed|failed)"#, { _ in .runEnded }),
         (#"^Suite \#(name) started\.$"#, { .suiteStarted($0[0]) }),
         (#"^Suite \#(name) (?:passed|failed|skipped)"#, { .suiteEnded($0[0]) }),
         (#"^Test case passing \d+ arguments? (.+) to \#(name) started\.$"#, { .caseStarted(test: $0[1], arguments: $0[0]) }),
-        (#"^Test \#(name) started\.$"#, { $0[0] == "run" ? nil : .testStarted($0[0]) }),
+        (#"^Test \#(name) started\.$"#, { .testStarted($0[0]) }),
         (#"^Test \#(name)(?: with \d+ test cases?)? (?:passed|failed|skipped)"#, { .testEnded($0[0]) }),
         (#"^Test \#(name) recorded an issue"#, { .issue($0[0]) }),
     ].map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
@@ -348,6 +480,7 @@ public enum TestRunner {
         func note(_ name: String) { if !overlapping.contains(name) { overlapping.append(name) } }
         for line in log.split(separator: "\n") {
             switch swiftTestingEvent(line) {
+            case .runStarted: running = [] // a relaunch after a crash starts over
             case let .suiteStarted(name):
                 for other in running where !(ancestors[name]?.contains(other) ?? false) && !(ancestors[other]?.contains(name) ?? false) {
                     note(other); note(name)
@@ -386,6 +519,7 @@ public enum TestRunner {
             }
             if swiftTestingBody(line) != nil {
                 switch swiftTestingEvent(line) {
+                case .runStarted: suites = []; running = [] // a relaunch after a crash starts over
                 case let .suiteStarted(name): suites.append(name)
                 case let .suiteEnded(name): if let index = suites.lastIndex(of: name) { suites.remove(at: index) }
                 case let .testStarted(name):
@@ -402,7 +536,7 @@ public enum TestRunner {
                        collected[index].linesBeforeIssue == nil {
                         collected[index].linesBeforeIssue = collected[index].lines.count
                     }
-                case nil: break
+                case .runEnded, nil: break
                 }
                 continue
             }
@@ -429,6 +563,32 @@ public enum TestRunner {
             return TestOutput(test: entry.test, argument: entry.argument, logLine: entry.line, text: text,
                               beforeIssue: beforeIssue, interleaved: entry.interleaved)
         }
+    }
+
+    /// "Suite/test" for each test that was running when xcodebuild had to relaunch the test host
+    /// ("Restarting after unexpected exit…", or a new "◇ Test run started." while tests were open).
+    static func interruptedTests(_ log: String) -> [String] {
+        var suites: [String] = []
+        var running: [String] = []
+        var interrupted: [String] = []
+        func relaunch() {
+            interrupted += running.filter { !interrupted.contains($0) }
+            running = []
+            suites = []
+        }
+        for line in log.split(separator: "\n") {
+            if line.contains("Restarting after unexpected exit") { relaunch(); continue }
+            switch swiftTestingEvent(line) {
+            case .runStarted: relaunch()
+            case let .suiteStarted(name): suites.append(name)
+            case let .suiteEnded(name): if let index = suites.lastIndex(of: name) { suites.remove(at: index) }
+            case let .testStarted(name): running.append((suites.last.map { "\($0)/" } ?? "") + name)
+            case let .testEnded(name):
+                if let index = running.firstIndex(where: { $0 == name || $0.hasSuffix("/" + name) }) { running.remove(at: index) }
+            default: break
+            }
+        }
+        return interrupted
     }
 
     private static func unquoted(_ name: Substring) -> String {

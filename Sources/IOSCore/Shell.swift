@@ -37,8 +37,10 @@ public enum Shell {
 
     /// Runs a tool with stdout and stderr written to `log`, for long, verbose tools like
     /// `xcodebuild build`. Returns the exit status; callers parse the log afterwards.
+    /// `watch` is given the log's new text about once a second; when it returns a reason, the tool
+    /// is stopped (SIGTERM, then SIGKILL after 10 seconds).
     public static func run(_ path: String, _ arguments: [String], log: URL, in directory: String? = nil,
-                           environment: [String: String] = [:]) throws -> Int32 {
+                           environment: [String: String] = [:], watch: ((String) -> String?)? = nil) throws -> Int32 {
         try FileManager.default.createDirectory(at: log.deletingLastPathComponent(), withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: log.path, contents: nil)
         let handle = try FileHandle(forWritingTo: log)
@@ -54,6 +56,22 @@ public enum Shell {
         process.standardOutput = handle
         process.standardError = handle
         try process.run()
+        guard let watch else {
+            process.waitUntilExit()
+            return process.terminationStatus
+        }
+        let reader = try FileHandle(forReadingFrom: log)
+        defer { try? reader.close() }
+        while process.isRunning {
+            Thread.sleep(forTimeInterval: 1)
+            let text = String(decoding: reader.readDataToEndOfFile(), as: UTF8.self)
+            guard watch(text) != nil else { continue }
+            process.terminate()
+            let deadline = Date().addingTimeInterval(10)
+            while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            break
+        }
         process.waitUntilExit()
         return process.terminationStatus
     }
