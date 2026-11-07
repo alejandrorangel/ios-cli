@@ -27,7 +27,7 @@ struct Install: ParsableCommand {
     func run() throws {
         let path = URL(fileURLWithPath: app).standardizedFileURL.path
         let bundleID = try Launcher.bundleIdentifier(ofApp: path)
-        let resolved = try TargetResolver.resolve(target.device)
+        let resolved = try TargetResolver.ensureReachable(TargetResolver.resolve(target.device))
         try Launcher.prepare(resolved)
         try Launcher.install(path, on: resolved)
         let launched = launch ? try Launcher.launch(bundleID, on: resolved) : nil

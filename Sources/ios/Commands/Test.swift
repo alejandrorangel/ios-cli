@@ -65,7 +65,7 @@ struct TestCommand: ParsableCommand {
     func run() throws {
         let environment = try TestRequest.parseEnvironment(environment)
         let container = try project.container()
-        let resolved = try TargetResolver.resolveSimulatorFirst(target.device)
+        let resolved = try TargetResolver.ensureReachable(TargetResolver.resolveSimulatorFirst(target.device))
         let (listing, _) = try Describer.listing(container)
         let scheme = try Describer.resolveScheme(project.scheme, in: listing)
 

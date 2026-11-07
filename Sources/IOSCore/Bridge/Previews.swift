@@ -8,6 +8,8 @@ public struct PreviewRequest: Sendable {
     /// Variant group → value, e.g. ["Color Scheme": "Dark"]; names come from a previous render.
     public let variants: [String: String]
     public let timeout: Int
+    /// Scheme to make active first: Xcode hosts the preview in the active scheme's product.
+    public var scheme: String?
 
     public init(container: Container, file: String, index: Int, locale: String?, variants: [String: String], timeout: Int) {
         self.container = container
@@ -114,6 +116,10 @@ public enum Previews {
         let bridge = try XcodeBridge()
         let workspace = try bridge.openWorkspace(request.container.path)
         let navigatorPath = try projectPath(of: request.file, in: workspace, bridge: bridge)
+        if let scheme = request.scheme {
+            // Persists, like picking the scheme in Xcode's toolbar.
+            try bridge.call("XcodeSwitchScheme", ["workspaceIdentifier": workspace, "schemeName": scheme])
+        }
 
         var arguments: [String: Any] = [
             "workspaceIdentifier": workspace, "sourceFilePath": navigatorPath,
@@ -125,7 +131,14 @@ public enum Previews {
 
         let errors = (result["errors"] as? [[String: Any]] ?? []).compactMap { $0["message"] as? String }
         guard let snapshot = result["previewSnapshotPath"] as? String, errors.isEmpty else {
-            throw IOSError.bridgeFailed(tool: "RenderPreview", message: errors.isEmpty ? "no snapshot produced" : errors.joined(separator: "\n"))
+            var message = errors.isEmpty ? "no snapshot produced" : errors.joined(separator: "\n")
+            if message.contains("DebugDylibNotEnabled") || message.contains("ENABLE_DEBUG_DYLIB") {
+                // Xcode hosts a preview in the active scheme's product; an executable that depends on the
+                // file's library is the wrong host unless it has debug dylibs on.
+                message += "\nXcode hosted the preview in the active scheme's executable. Pass --scheme with the scheme "
+                    + "that builds this file's library or app (`ios describe` lists them), or set ENABLE_DEBUG_DYLIB = YES on that target."
+            }
+            throw IOSError.bridgeFailed(tool: "RenderPreview", message: message)
         }
         let destination = URL(fileURLWithPath: output).standardizedFileURL
         try? FileManager.default.removeItem(at: destination)

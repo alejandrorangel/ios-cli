@@ -44,6 +44,9 @@ struct Preview: ParsableCommand {
     @Option(help: "Seconds to wait for the render.")
     var timeout = 180
 
+    @Option(help: "Make this scheme active first (Xcode hosts the preview in its product). The choice stays, as in Xcode's toolbar.")
+    var scheme: String?
+
     func validate() throws {
         if index != nil && name != nil { throw ValidationError("Pass --index or --name, not both.") }
     }
@@ -69,10 +72,9 @@ struct Preview: ParsableCommand {
         let destination = output ?? "\(base)-preview.png"
 
         Docs.progress("Rendering \(base) preview #\(position)\(name.map { " (\"\($0)\")" } ?? "") with Xcode…")
-        let result = try Previews.render(
-            PreviewRequest(container: container, file: file, index: position, locale: locale, variants: variants, timeout: timeout),
-            output: destination
-        )
+        var request = PreviewRequest(container: container, file: file, index: position, locale: locale, variants: variants, timeout: timeout)
+        request.scheme = scheme
+        let result = try Previews.render(request, output: destination)
         try Output.emit(result, json: global.json) {
             var lines = ["Saved \(result.image)"]
             lines.append("Preview: \(result.displayName ?? base)" + (result.line.map { " (line \($0))" } ?? "")

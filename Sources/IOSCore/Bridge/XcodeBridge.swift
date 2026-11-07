@@ -48,6 +48,11 @@ public final class XcodeBridge {
         return ["text": text]
     }
 
+    /// The tools Xcode offers, with their descriptions and input schemas.
+    public func tools() throws -> [[String: Any]] {
+        try request("tools/list", [:])["tools"] as? [[String: Any]] ?? []
+    }
+
     /// Opens (or finds the already open) workspace or project; returns its workspace identifier,
     /// which other tools need (passing the path instead doesn't work, despite the schema).
     public func openWorkspace(_ path: String) throws -> String {

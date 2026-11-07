@@ -51,10 +51,13 @@ struct AppCommand: ParsableCommand {
         @Option(help: "The app's bundle identifier.")
         var bundleID: String
 
+        @OptionGroup var launchOptions: LaunchOptions
+
         func run() throws {
-            let resolved = try TargetResolver.resolve(target.device)
+            let resolved = try TargetResolver.ensureReachable(TargetResolver.resolve(target.device))
             try Launcher.prepare(resolved)
-            let launch = try Launcher.launch(bundleID, on: resolved)
+            let launch = try Launcher.launch(bundleID, on: resolved, arguments: launchOptions.arguments,
+                                             environment: launchOptions.environmentValues())
             try Output.emit(launch, json: global.json) {
                 "Launched \(bundleID) on \(resolved.label)" + (launch.pid.map { " (pid \($0))" } ?? "")
             }

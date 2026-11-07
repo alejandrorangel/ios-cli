@@ -38,6 +38,8 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
     case skillNotInstalled(name: String, directory: String)
     case simulatorOnly(command: String)
     case waitTimedOut(query: String, seconds: Double, gone: Bool, covered: Bool)
+    /// A failure whose message says it all (what went wrong and what to do).
+    case failed(String)
     case scrollTargetNotFound(query: String, swipes: Int, reachedEnd: Bool)
     case simulatorNotBooted(name: String, udid: String)
     case invalidEnvironment(String)
@@ -98,6 +100,8 @@ public enum IOSError: Error, CustomStringConvertible, Equatable {
         case let .runnerTeamRequired(candidates):
             let base = "A physical device needs the runner signed by your development team; pass --team <TEAM_ID> or set IOS_CLI_TEAM."
             return base + (candidates.isEmpty ? "" : "\nTeams with a wildcard development profile for this device:" + Self.list(candidates))
+        case let .failed(message):
+            return message
         case let .elementNotFound(query):
             return "No visible element matches \(query). Run `ios layout` to see what's on screen."
         case .noAppSelected:
