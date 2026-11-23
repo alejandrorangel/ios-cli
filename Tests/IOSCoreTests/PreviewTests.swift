@@ -53,3 +53,57 @@ struct ContentView_Previews: PreviewProvider {
     #expect(Previews.stripComments("still comment */ after", inBlockComment: &inBlock) == " after")
     #expect(!inBlock)
 }
+
+private let packagesLoading = IOSError.bridgeFailed(
+    tool: "RenderPreview",
+    message: "PreviewBlockedReason: Waiting for packages to load\n\nWait to update previews until all package loading is complete\n\ntearingDown")
+
+/// A clock that only moves when the retry loop sleeps.
+private final class FakeClock {
+    var time = Date(timeIntervalSince1970: 0)
+    var sleeps = 0
+    func now() -> Date { time }
+    func sleep(_ seconds: TimeInterval) { sleeps += 1; time += seconds }
+}
+
+@Test func retriesWhilePackagesLoad() throws {
+    let clock = FakeClock()
+    var calls = 0, waits = 0
+    let value = try Previews.untilPackagesLoad(limit: 60, interval: 3, now: clock.now, sleep: clock.sleep,
+                                               onWait: { waits += 1 }) { () throws -> String in
+        calls += 1
+        if calls < 3 { throw packagesLoading }
+        return "rendered"
+    }
+    #expect(value == "rendered")
+    #expect(calls == 3)
+    #expect(waits == 2)
+    #expect(clock.sleeps == 2)
+}
+
+@Test func otherRenderErrorsAreNotRetried() {
+    let clock = FakeClock()
+    var calls = 0
+    let failure = IOSError.bridgeFailed(tool: "RenderPreview", message: "Unsupported variant ‘Purple’")
+    #expect(throws: failure) {
+        try Previews.untilPackagesLoad(now: clock.now, sleep: clock.sleep) { () throws -> Int in
+            calls += 1
+            throw failure
+        }
+    }
+    #expect(calls == 1)
+    #expect(clock.sleeps == 0)
+}
+
+@Test func givesUpWhenPackagesKeepLoading() {
+    let clock = FakeClock()
+    var calls = 0
+    #expect(throws: packagesLoading) {
+        try Previews.untilPackagesLoad(limit: 10, interval: 3, now: clock.now, sleep: clock.sleep) { () throws -> Int in
+            calls += 1
+            throw packagesLoading
+        }
+    }
+    // Tries at 0, 3, 6 and 9 s are inside the limit; the one at 12 s is past it and its error is thrown.
+    #expect(calls == 5)
+}
