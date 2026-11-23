@@ -74,7 +74,7 @@ struct Preview: ParsableCommand {
         Docs.progress("Rendering \(base) preview #\(position)\(name.map { " (\"\($0)\")" } ?? "") with Xcode…")
         var request = PreviewRequest(container: container, file: file, index: position, locale: locale, variants: variants, timeout: timeout)
         request.scheme = scheme
-        let result = try Previews.render(request, output: destination)
+        let result = try Previews.render(request, output: destination, progress: Docs.progress)
         try Output.emit(result, json: global.json) {
             var lines = ["Saved \(result.image)"]
             lines.append("Preview: \(result.displayName ?? base)" + (result.line.map { " (line \($0))" } ?? "")

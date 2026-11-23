@@ -112,7 +112,8 @@ public enum Previews {
     }
 
     /// Renders a SwiftUI preview through Xcode and copies the snapshot to `output`.
-    public static func render(_ request: PreviewRequest, output: String) throws -> PreviewResult {
+    public static func render(_ request: PreviewRequest, output: String,
+                              progress report: (String) -> Void = { _ in }) throws -> PreviewResult {
         let bridge = try XcodeBridge()
         let workspace = try bridge.openWorkspace(request.container.path)
         let navigatorPath = try projectPath(of: request.file, in: workspace, bridge: bridge)
@@ -127,18 +128,11 @@ public enum Previews {
         ]
         if let locale = request.locale { arguments["previewLocalizationOverride"] = locale }
         if !request.variants.isEmpty { arguments["previewVariantOverrides"] = request.variants }
-        let result = try bridge.call("RenderPreview", arguments)
-
-        let errors = (result["errors"] as? [[String: Any]] ?? []).compactMap { $0["message"] as? String }
-        guard let snapshot = result["previewSnapshotPath"] as? String, errors.isEmpty else {
-            var message = errors.isEmpty ? "no snapshot produced" : errors.joined(separator: "\n")
-            if message.contains("DebugDylibNotEnabled") || message.contains("ENABLE_DEBUG_DYLIB") {
-                // Xcode hosts a preview in the active scheme's product; an executable that depends on the
-                // file's library is the wrong host unless it has debug dylibs on.
-                message += "\nXcode hosted the preview in the active scheme's executable. Pass --scheme with the scheme "
-                    + "that builds this file's library or app (`ios describe` lists them), or set ENABLE_DEBUG_DYLIB = YES on that target."
-            }
-            throw IOSError.bridgeFailed(tool: "RenderPreview", message: message)
+        var waited = false
+        let (result, snapshot) = try untilPackagesLoad(onWait: {
+            if !waited { report("Xcode is still loading the project's packages; waiting…"); waited = true }
+        }) {
+            try renderOnce(bridge, arguments)
         }
         let destination = URL(fileURLWithPath: output).standardizedFileURL
         try? FileManager.default.removeItem(at: destination)
@@ -153,6 +147,46 @@ public enum Previews {
             supportedLocales: result["supportedLocalizations"] as? [String] ?? [],
             supportedVariants: variants(result["supportedPreviewVariantOverrides"])
         )
+    }
+
+    /// One RenderPreview call: the result and its snapshot path, or the error Xcode reported.
+    static func renderOnce(_ bridge: XcodeBridge, _ arguments: [String: Any]) throws -> ([String: Any], String) {
+        let result = try bridge.call("RenderPreview", arguments)
+        let errors = (result["errors"] as? [[String: Any]] ?? []).compactMap { $0["message"] as? String }
+        guard let snapshot = result["previewSnapshotPath"] as? String, errors.isEmpty else {
+            var message = errors.isEmpty ? "no snapshot produced" : errors.joined(separator: "\n")
+            if message.contains("DebugDylibNotEnabled") || message.contains("ENABLE_DEBUG_DYLIB") {
+                // Xcode hosts a preview in the active scheme's product; an executable that depends on the
+                // file's library is the wrong host unless it has debug dylibs on.
+                message += "\nXcode hosted the preview in the active scheme's executable. Pass --scheme with the scheme "
+                    + "that builds this file's library or app (`ios describe` lists them), or set ENABLE_DEBUG_DYLIB = YES on that target."
+            }
+            throw IOSError.bridgeFailed(tool: "RenderPreview", message: message)
+        }
+        return (result, snapshot)
+    }
+
+    /// Xcode won't render while it resolves the workspace's packages ("PreviewBlockedReason: Waiting for
+    /// packages to load"), which a freshly started tool service is often still doing on the first call.
+    static func isWaitingForPackages(_ message: String) -> Bool {
+        message.contains("Waiting for packages to load")
+    }
+
+    /// Runs `body`, trying again every `interval` seconds while it fails only because packages are still
+    /// loading, for up to `limit` seconds; any other error, or the last one past the limit, is thrown.
+    static func untilPackagesLoad<T>(limit: TimeInterval = 180, interval: TimeInterval = 3,
+                                     now: () -> Date = Date.init,
+                                     sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+                                     onWait: () -> Void = {}, _ body: () throws -> T) throws -> T {
+        let deadline = now().addingTimeInterval(limit)
+        while true {
+            do {
+                return try body()
+            } catch let IOSError.bridgeFailed(_, message) where isWaitingForPackages(message) && now() < deadline {
+                onWait()
+                sleep(interval)
+            }
+        }
     }
 
     /// RenderPreview takes the file's path in the project navigator ("App/Views/Home.swift"),
